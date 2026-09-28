@@ -1,0 +1,25 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: budget-tracker-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DATABASE_USER:-budget_tracker}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-budget_tracker}
+      POSTGRES_DB: ${DATABASE_NAME:-budget_tracker}
+    ports:
+      - '${DATABASE_PORT:-5432}:5432'
+    volumes:
+      - budget_tracker_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'pg_isready -U ${DATABASE_USER:-budget_tracker} -d ${DATABASE_NAME:-budget_tracker}',
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  budget_tracker_pgdata:
