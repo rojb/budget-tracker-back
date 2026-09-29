@@ -27,3 +27,6 @@ Thumbs.db
 # misc
 .swc/
 coverage/
+
+# generated OpenAPI spec (npm run openapi:export)
+openapi.generated.json
