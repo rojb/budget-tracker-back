@@ -48,6 +48,8 @@ Detalles de diseño:
 - `AuthGuard` es global (`APP_GUARD`): todo endpoint exige un token válido salvo que lleve
   `@Public()` (de `src/auth/public.decorator.ts`, que también lo marca público en el spec). Un
   endpoint nuevo sin decorador queda protegido.
+- El algoritmo del JWT está fijado a HS256 al firmar y al verificar (`src/auth/auth.module.ts`):
+  un token firmado con otro algoritmo (aunque use el mismo secreto) o con `alg: none` responde 401.
 - Trade-off aceptado: sin refresh token, un token robado vale hasta que expire (alcance
   académico, sin despliegue).
 
@@ -111,19 +113,41 @@ Con la app corriendo (fuera de `production`), la documentación interactiva est�
 
 ### Chequeo de drift del contrato
 
-El job `contract-drift` de CI (`.github/workflows/ci.yml`) clona `rojb/budget-tracker-specs`,
-corre `npm run openapi:export` y ejecuta `scripts/contract-drift.mjs`, que usa `oasdiff` con el
-contrato como base:
+El job `contract-drift` de CI (`.github/workflows/ci.yml`) clona `rojb/budget-tracker-specs` en el
+commit fijado en `.contract-ref`, corre `npm run openapi:export` y ejecuta
+`scripts/contract-drift.mjs`, que usa `oasdiff` con el contrato como base:
 
 - Solo se comparan los paths que el back **ya implementa**; el contrato puede ir por delante.
 - Falla si un endpoint implementado tiene un cambio incompatible respecto al contrato o si existe
   en el back pero no en el contrato.
 - Los paths del contrato aún sin implementar se listan como aviso, sin fallar.
+- Falla cerrado: si `oasdiff` no está o su salida no se puede interpretar, el script termina con
+  error (códigos de salida: `0` sin drift, `1` drift, `2` el chequeo no pudo correr).
+- CI verifica el SHA-256 del tarball de `oasdiff` (constante `OASDIFF_SHA256` del workflow, tomada
+  del `checksums.txt` de la release) antes de extraerlo. Al subir `OASDIFF_VERSION` hay que
+  actualizar también el hash.
 
-Para correrlo local (binario de [oasdiff](https://github.com/oasdiff/oasdiff/releases) v1.32.1 en
-el `PATH`, o su ruta en `OASDIFF`):
+### Contrato fijado (`.contract-ref`)
+
+`.contract-ref` guarda el SHA completo del commit de `budget-tracker-specs` cuyo `openapi.yaml`
+implementa este back. Como CI compara contra ese commit y no contra `main`, no se rompe cuando
+specs avanza. Para subirlo, el commit del back que implementa la nueva versión del contrato lo
+actualiza (procedimiento completo en `docs/COLABORACION.md` sección 4):
+
+```bash
+git -C ../budget-tracker-specs rev-parse main > .contract-ref
+```
+
+### Correr el drift en local
+
+Requiere [oasdiff](https://github.com/oasdiff/oasdiff/releases) v1.32.1 en el `PATH` (o su ruta en
+`OASDIFF`); sin él el script falla con un mensaje claro. Se compara contra el contrato del commit
+fijado:
 
 ```bash
 npm run openapi:export
-node scripts/contract-drift.mjs ../budget-tracker-specs/openapi.yaml openapi.generated.json
+git -C ../budget-tracker-specs show "$(cat .contract-ref):openapi.yaml" > contract.pinned.yaml
+node scripts/contract-drift.mjs contract.pinned.yaml openapi.generated.json
 ```
+
+(`contract.pinned.yaml` es un archivo temporal; no se commitea.)
