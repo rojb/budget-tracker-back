@@ -14,6 +14,10 @@ export interface JwtPayload {
   sub: string;
 }
 
+// A message string makes Nest emit the full { statusCode, message, error } shape
+// (a bare UnauthorizedException() omits `error`).
+const unauthorized = () => new UnauthorizedException('Unauthorized');
+
 // Global guard (APP_GUARD): every route requires a valid bearer token unless it is
 // marked @Public(). Fails closed: a forgotten decorator means 401, not an open route.
 @Injectable()
@@ -33,17 +37,17 @@ export class AuthGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
     const [scheme, token] = request.headers.authorization?.split(' ') ?? [];
-    if (scheme !== 'Bearer' || !token) throw new UnauthorizedException();
+    if (scheme !== 'Bearer' || !token) throw unauthorized();
 
     let payload: JwtPayload;
     try {
       payload = await this.jwt.verifyAsync<JwtPayload>(token);
     } catch {
-      throw new UnauthorizedException();
+      throw unauthorized();
     }
 
     const user = await this.users.findById(payload.sub);
-    if (!user) throw new UnauthorizedException();
+    if (!user) throw unauthorized();
     request.user = user;
     return true;
   }
