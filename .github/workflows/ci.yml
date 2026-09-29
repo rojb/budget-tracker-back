@@ -33,10 +33,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Public repo: the approved contract on its default branch (contract-first).
+      # The contract version this backend implements: a full specs commit SHA in .contract-ref.
+      # Fails on anything else, so an empty or malformed file can never fall back to a branch.
+      - name: Read pinned contract ref
+        id: contract-ref
+        run: |
+          ref="$(tr -d '[:space:]' < .contract-ref)"
+          if ! [[ "$ref" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::.contract-ref must contain a full 40-character commit SHA, got '$ref'"
+            exit 1
+          fi
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+      # Public repo, pinned to the commit above (bump procedure: docs/COLABORACION.md section 4).
       - uses: actions/checkout@v4
         with:
           repository: rojb/budget-tracker-specs
+          ref: ${{ steps.contract-ref.outputs.ref }}
           path: specs
 
       - uses: actions/setup-node@v4
