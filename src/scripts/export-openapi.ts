@@ -1,8 +1,10 @@
 import { writeFileSync } from 'node:fs';
 import { NestFactory } from '@nestjs/core';
 
-// The env schema validates DATABASE_* at import time. The export never connects
-// to the database (preview mode), so placeholders are enough when .env is absent.
+// The env schema validates DATABASE_* and JWT_SECRET at import time. The export never
+// connects to the database or signs tokens (preview mode), so placeholders are enough
+// when .env is absent.
+process.env.JWT_SECRET ??= 'openapi-export-placeholder-secret-0123456789';
 process.env.DATABASE_HOST ??= 'localhost';
 process.env.DATABASE_PORT ??= '5432';
 process.env.DATABASE_USER ??= 'openapi';
