@@ -30,6 +30,7 @@ npm run start:dev
 | `npm run start:dev` | Levanta la app en modo watch |
 | `npm run build` | Compila TypeScript a `dist/` |
 | `npm run lint` | Corre `oxlint` sobre `src/` |
+| `npm run openapi:export` | Compila y escribe `openapi.generated.json` (spec real de la API, sin base de datos; ignorado por git) |
 | `npm run migration:generate` | Genera una migración TypeORM a partir de los cambios en las entidades |
 | `npm run migration:run` | Aplica migraciones pendientes contra la base configurada en `.env` |
 | `npm run migration:revert` | Revierte la última migración aplicada |
@@ -72,3 +73,29 @@ una vez que `api-contract-base` (RRG-42) esté integrado.
 Fuente de verdad del contrato y del proceso de trabajo:
 [budget-tracker-specs](https://github.com/rojb/budget-tracker-specs) (OpenSpec, `openapi.yaml`,
 `docs/COLABORACION.md`).
+
+### Swagger UI
+
+Con la app corriendo (fuera de `production`), la documentación interactiva está en
+`http://localhost:3000/docs`. Los controllers se documentan con decoradores de `@nestjs/swagger`
+(`@ApiTags`, `@ApiOkResponse`, `@ApiProperty` en los DTO); un endpoint público se marca con
+`@ApiSecurity({})` (el resto exige bearer JWT por defecto).
+
+### Chequeo de drift del contrato
+
+El job `contract-drift` de CI (`.github/workflows/ci.yml`) clona `rojb/budget-tracker-specs`,
+corre `npm run openapi:export` y ejecuta `scripts/contract-drift.mjs`, que usa `oasdiff` con el
+contrato como base:
+
+- Solo se comparan los paths que el back **ya implementa**; el contrato puede ir por delante.
+- Falla si un endpoint implementado tiene un cambio incompatible respecto al contrato o si existe
+  en el back pero no en el contrato.
+- Los paths del contrato aún sin implementar se listan como aviso, sin fallar.
+
+Para correrlo local (binario de [oasdiff](https://github.com/oasdiff/oasdiff/releases) v1.32.1 en
+el `PATH`, o su ruta en `OASDIFF`):
+
+```bash
+npm run openapi:export
+node scripts/contract-drift.mjs ../budget-tracker-specs/openapi.yaml openapi.generated.json
+```

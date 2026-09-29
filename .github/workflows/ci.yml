@@ -22,3 +22,34 @@ jobs:
       - run: npm run lint
 
       - run: npm run build
+
+  contract-drift:
+    runs-on: ubuntu-latest
+    env:
+      OASDIFF_VERSION: 1.32.1
+    steps:
+      - uses: actions/checkout@v4
+
+      # Public repo: the approved contract on its default branch (contract-first).
+      - uses: actions/checkout@v4
+        with:
+          repository: rojb/budget-tracker-specs
+          path: specs
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Builds and exports openapi.generated.json without a database (preview mode).
+      - run: npm run openapi:export
+
+      - name: Install oasdiff
+        run: |
+          curl -sSL "https://github.com/oasdiff/oasdiff/releases/download/v${OASDIFF_VERSION}/oasdiff_${OASDIFF_VERSION}_linux_amd64.tar.gz" | tar -xz -C "$RUNNER_TEMP" oasdiff
+          echo "OASDIFF=$RUNNER_TEMP/oasdiff" >> "$GITHUB_ENV"
+
+      - name: Compare implemented endpoints with the contract
+        run: node scripts/contract-drift.mjs specs/openapi.yaml openapi.generated.json
