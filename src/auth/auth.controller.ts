@@ -8,6 +8,7 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import { ErrorDto, ValidationErrorDto } from '../common/dto/error.dto.js';
 import { AuthService } from './auth.service.js';
 import { AuthSessionDto } from './dto/auth-session.dto.js';
 import { LoginDto } from './dto/login.dto.js';
@@ -26,9 +27,13 @@ export class AuthController {
     description: 'The account was created.',
     type: AuthSessionDto,
   })
-  @ApiBadRequestResponse({ description: 'The request failed validation.' })
+  @ApiBadRequestResponse({
+    description: 'The request failed validation.',
+    type: ValidationErrorDto,
+  })
   @ApiConflictResponse({
     description: 'An account with that email already exists.',
+    type: ErrorDto,
   })
   register(@Body() dto: RegisterDto): Promise<AuthSessionDto> {
     return this.auth.register(dto);
@@ -41,8 +46,14 @@ export class AuthController {
     description: 'The credentials are valid.',
     type: AuthSessionDto,
   })
-  @ApiBadRequestResponse({ description: 'The request failed validation.' })
-  @ApiUnauthorizedResponse({ description: 'Wrong email or password.' })
+  @ApiBadRequestResponse({
+    description: 'The request failed validation.',
+    type: ValidationErrorDto,
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Wrong email or password.',
+    type: ErrorDto,
+  })
   login(@Body() dto: LoginDto): Promise<AuthSessionDto> {
     return this.auth.login(dto);
   }
