@@ -14,9 +14,13 @@ import { AuthService } from './auth.service.js';
       inject: [ConfigService],
       useFactory: (config: ConfigService): JwtModuleOptions => ({
         secret: config.getOrThrow<string>('JWT_SECRET'),
+        // Pin the algorithm both ways: sign with HS256 and accept only HS256, so a token
+        // signed with another algorithm (even with our secret) or `alg: none` is rejected.
         signOptions: {
+          algorithm: 'HS256',
           expiresIn: config.get<string>('JWT_EXPIRES_IN', '7d') as never,
         },
+        verifyOptions: { algorithms: ['HS256'] },
       }),
     }),
   ],

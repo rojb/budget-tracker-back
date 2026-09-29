@@ -27,13 +27,29 @@ jobs:
     runs-on: ubuntu-latest
     env:
       OASDIFF_VERSION: 1.32.1
+      # SHA-256 of oasdiff_${OASDIFF_VERSION}_linux_amd64.tar.gz, from the release checksums.txt.
+      # Update together with OASDIFF_VERSION.
+      OASDIFF_SHA256: 7c8939fc49b75ee11fec66a5b83b37a2fca6aee109fed85013b1ba2ac2a1ee7f
     steps:
       - uses: actions/checkout@v4
 
-      # Public repo: the approved contract on its default branch (contract-first).
+      # The contract version this backend implements: a full specs commit SHA in .contract-ref.
+      # Fails on anything else, so an empty or malformed file can never fall back to a branch.
+      - name: Read pinned contract ref
+        id: contract-ref
+        run: |
+          ref="$(tr -d '[:space:]' < .contract-ref)"
+          if ! [[ "$ref" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::.contract-ref must contain a full 40-character commit SHA, got '$ref'"
+            exit 1
+          fi
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+      # Public repo, pinned to the commit above (bump procedure: docs/COLABORACION.md section 4).
       - uses: actions/checkout@v4
         with:
           repository: rojb/budget-tracker-specs
+          ref: ${{ steps.contract-ref.outputs.ref }}
           path: specs
 
       - uses: actions/setup-node@v4
@@ -48,7 +64,10 @@ jobs:
 
       - name: Install oasdiff
         run: |
-          curl -sSL "https://github.com/oasdiff/oasdiff/releases/download/v${OASDIFF_VERSION}/oasdiff_${OASDIFF_VERSION}_linux_amd64.tar.gz" | tar -xz -C "$RUNNER_TEMP" oasdiff
+          archive="$RUNNER_TEMP/oasdiff_${OASDIFF_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL -o "$archive" "https://github.com/oasdiff/oasdiff/releases/download/v${OASDIFF_VERSION}/oasdiff_${OASDIFF_VERSION}_linux_amd64.tar.gz"
+          echo "${OASDIFF_SHA256}  ${archive}" | sha256sum -c -
+          tar -xz -C "$RUNNER_TEMP" -f "$archive" oasdiff
           echo "OASDIFF=$RUNNER_TEMP/oasdiff" >> "$GITHUB_ENV"
 
       - name: Compare implemented endpoints with the contract
