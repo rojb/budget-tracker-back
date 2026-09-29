@@ -23,6 +23,34 @@ npm run start:dev
 
 `GET /health` responde `{ "status": "ok" }` una vez que la app arrancó y se conectó a la base.
 
+## Autenticación
+
+Cambio `add-auth` (RRG-44). Sesión con un único JWT de acceso (`Authorization: Bearer <token>`),
+sin refresh token; el logout es del lado del cliente (borrar el token).
+
+| Endpoint | Acceso | Qué hace |
+|---|---|---|
+| `POST /auth/register` | público | Crea la cuenta (`name`, `email`, `password` de 8 a 128) y devuelve `{ accessToken, user }` (201); email duplicado → 409 |
+| `POST /auth/login` | público | Devuelve `{ accessToken, user }` (200); cualquier fallo de credenciales → 401 con un mensaje genérico |
+| `GET /users/me` | bearer | Devuelve el usuario de la sesión |
+| `GET /health` | público | Liveness |
+
+Variables de entorno (validadas con Joi; sin `JWT_SECRET` la app no arranca):
+
+- `JWT_SECRET`: secreto de firma, mínimo 32 caracteres.
+- `JWT_EXPIRES_IN`: duración del token, por defecto `7d`.
+
+Detalles de diseño:
+
+- Los emails se guardan en minúsculas (con `CHECK` en la base) y son únicos.
+- Las contraseñas se guardan solo como hash Argon2id (19 MiB, 2 iteraciones, 1 hilo); nunca se
+  devuelven ni se loguean.
+- `AuthGuard` es global (`APP_GUARD`): todo endpoint exige un token válido salvo que lleve
+  `@Public()` (de `src/auth/public.decorator.ts`, que también lo marca público en el spec). Un
+  endpoint nuevo sin decorador queda protegido.
+- Trade-off aceptado: sin refresh token, un token robado vale hasta que expire (alcance
+  académico, sin despliegue).
+
 ## Scripts principales
 
 | Script | Qué hace |
@@ -79,7 +107,7 @@ Fuente de verdad del contrato y del proceso de trabajo:
 Con la app corriendo (fuera de `production`), la documentación interactiva está en
 `http://localhost:3000/docs`. Los controllers se documentan con decoradores de `@nestjs/swagger`
 (`@ApiTags`, `@ApiOkResponse`, `@ApiProperty` en los DTO); un endpoint público se marca con
-`@ApiSecurity({})` (el resto exige bearer JWT por defecto).
+`@Public()` (el resto exige bearer JWT por defecto).
 
 ### Chequeo de drift del contrato
 
