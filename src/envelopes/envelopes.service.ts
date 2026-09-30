@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, IsNull, Repository } from 'typeorm';
+import { DataSource, In, IsNull, Repository } from 'typeorm';
 import { AccountsService } from '../accounts/accounts.service.js';
 import { AssignmentsService } from '../budget/assignments.service.js';
 import { CalculationService } from '../budget/calculation.service.js';
@@ -20,6 +20,10 @@ import {
   type CreateEnvelopeDto,
   type UpdateEnvelopeDto,
 } from './dto/envelope.dto.js';
+import {
+  InitialAssignmentResultDto,
+  type InitialAssignmentRequestDto,
+} from './dto/initial-assignment.dto.js';
 import { EnvelopeTemplateResultDto } from './dto/envelope-template.dto.js';
 import { EnvelopeGroup } from './entities/envelope-group.entity.js';
 import { Envelope } from './entities/envelope.entity.js';
@@ -162,6 +166,41 @@ export class EnvelopesService {
       order: { position: 'ASC', createdAt: 'ASC' },
     });
     return reordered.map((row) => EnvelopeDto.fromEntity(row));
+  }
+
+  // Screen 46: stores each amount as the envelope's assignment for the month (replacing the previous
+  // one) through the engine's assignment facts, all or nothing, and reports the month's Ready to
+  // Assign, which is negative when more is assigned than is available (never clamped).
+  async assignInitial(
+    planId: string,
+    dto: InitialAssignmentRequestDto,
+  ): Promise<InitialAssignmentResultDto> {
+    const plan = await this.plans.findOneByOrFail({ id: planId });
+    const month: MonthKey = dto.month ?? currentMonth(plan.timeZone);
+    const ids = dto.assignments.map((row) => row.envelopeId);
+    if (new Set(ids).size !== ids.length) {
+      throw new BadRequestException([
+        'assignments must not repeat an envelope',
+      ]);
+    }
+    if (
+      (await this.envelopes.countBy({ planId, id: In(ids) })) !== ids.length
+    ) {
+      throw new NotFoundException('Envelope not found');
+    }
+    await this.assignments.setAssignments(planId, month, dto.assignments);
+    const state = this.calculation.calculateMonth(
+      await this.ledger(plan),
+      month,
+    );
+    const result = new InitialAssignmentResultDto();
+    result.month = month;
+    result.assignedMinor = state.envelopes.reduce(
+      (sum, envelope) => sum + envelope.assignedMinor,
+      0,
+    );
+    result.readyToAssignMinor = state.readyToAssignMinor;
+    return result;
   }
 
   // Creates the selected template envelopes (all of them when `names` is absent) without any

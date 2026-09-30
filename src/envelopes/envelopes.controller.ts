@@ -37,6 +37,10 @@ import {
   ReorderEnvelopesDto,
   UpdateEnvelopeDto,
 } from './dto/envelope.dto.js';
+import {
+  InitialAssignmentRequestDto,
+  InitialAssignmentResultDto,
+} from './dto/initial-assignment.dto.js';
 import { EnvelopesService } from './envelopes.service.js';
 
 const unauthorized = ApiUnauthorizedResponse({
@@ -138,6 +142,30 @@ export class EnvelopesController {
   ): Promise<EnvelopeDto[]> {
     await this.access.require(planId, user.id, WRITE_ROLES);
     return this.envelopes.reorder(planId, dto.groupId, dto.envelopeIds);
+  }
+
+  @Post('initial-assignment')
+  @HttpCode(200)
+  @ApiOperation({
+    operationId: 'applyInitialAssignment',
+    summary: 'Assign money to several envelopes at once (owner or editor)',
+  })
+  @planIdParam
+  @ApiOkResponse({
+    description: 'The month, the total assigned and the Ready to Assign.',
+    type: InitialAssignmentResultDto,
+  })
+  @badRequest
+  @unauthorized
+  @forbidden
+  @notFound
+  async assignInitial(
+    @CurrentUser() user: User,
+    @Param('planId', parseUuid('planId')) planId: string,
+    @Body() dto: InitialAssignmentRequestDto,
+  ): Promise<InitialAssignmentResultDto> {
+    await this.access.require(planId, user.id, WRITE_ROLES);
+    return this.envelopes.assignInitial(planId, dto);
   }
 
   @Get(':envelopeId')
