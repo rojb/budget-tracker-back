@@ -6,6 +6,7 @@ import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
 import { AuthModule } from './auth/auth.module.js';
 import { BudgetModule } from './budget/budget.module.js';
+import { EnvelopesModule } from './envelopes/envelopes.module.js';
 import { PayeesModule } from './payees/payees.module.js';
 import { PlansModule } from './plans/plans.module.js';
 import { SharingModule } from './sharing/sharing.module.js';
@@ -37,6 +38,7 @@ import { UsersModule } from './users/users.module.js';
     PlansModule,
     AccountsModule,
     PayeesModule,
+    EnvelopesModule,
     SharingModule,
   ],
   controllers: [AppController],
