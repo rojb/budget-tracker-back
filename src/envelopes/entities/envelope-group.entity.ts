@@ -9,9 +9,9 @@ import {
 } from 'typeorm';
 import { Plan } from '../../plans/entities/plan.entity.js';
 
-// Deleted logically: past transactions keep referencing the row (FR-05).
-@Entity({ name: 'payees' })
-export class Payee {
+// An ordered group of envelopes. Deleting it keeps its envelopes (they lose the group).
+@Entity({ name: 'envelope_groups' })
+export class EnvelopeGroup {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
@@ -25,12 +25,9 @@ export class Payee {
   @Column({ type: 'varchar', length: 60 })
   name!: string;
 
-  // FK_payees_suggested_envelope (ON DELETE SET NULL) comes from add-envelopes.
-  @Column({ name: 'suggested_envelope_id', type: 'uuid', nullable: true })
-  suggestedEnvelopeId!: string | null;
-
-  @Column({ name: 'deleted_at', type: 'timestamptz', nullable: true })
-  deletedAt!: Date | null;
+  // Zero-based place of the group in the plan.
+  @Column({ type: 'integer' })
+  position!: number;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;

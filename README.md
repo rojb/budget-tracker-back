@@ -140,7 +140,8 @@ Cambio `add-payees` (RRG-48). Módulo `src/payees/`.
 - `PayeesService.findOrCreate(planId, name)` (exportado) devuelve el beneficiario activo con ese
   nombre o lo crea: pensado para `add-transactions` (pantalla 26 y alta al primer uso).
 - `transactionCounts(planId)` devuelve 0 para todos hasta que `add-transactions` lo reemplace por un
-  `GROUP BY payee_id`. `suggested_envelope_id` no tiene FK todavía: la agrega `add-envelopes`.
+  `GROUP BY payee_id`. `suggested_envelope_id` tiene FK a `envelopes` (`ON DELETE SET NULL`, cambio
+  `add-envelopes`) y el servicio valida que el sobre sea del plan (otro plan → 404).
 
 ## Planes compartidos
 
@@ -179,6 +180,42 @@ sobres ni beneficiarios, FR-28).
   dos activas el total no cambia).
 - `add-transactions` puede mostrar transferencias junto a los movimientos en la pantalla 10 con un
   `UNION` sobre esta tabla.
+
+## Sobres y grupos
+
+Cambio `add-envelopes` (RRG-47). Módulo `src/envelopes/` (FR-04).
+
+| Endpoint | Rol | Qué hace |
+|---|---|---|
+| `GET /envelope-template` | cualquier sesión | Plantilla sugerida: 4 grupos y 12 sobres con su ícono, igual para todos los planes |
+| `GET /plans/:planId/envelope-groups` | miembro | Grupos en orden, con su cantidad de sobres |
+| `POST /plans/:planId/envelope-groups` | `owner`, `editor` | Crea un grupo al final; nombre repetido (sin distinguir mayúsculas) → 409 |
+| `PATCH /plans/:planId/envelope-groups/:groupId` | `owner`, `editor` | Renombra (409 si el nombre ya existe) |
+| `DELETE /plans/:planId/envelope-groups/:groupId` | `owner`, `editor` | Borra el grupo; sus sobres quedan «Sin grupo» (al final, sin perder asignaciones) |
+| `PUT /plans/:planId/envelope-groups/order` | `owner`, `editor` | Ordena: `groupIds` debe traer todos los grupos una vez (si no, 400) |
+| `POST /plans/:planId/envelope-groups/template` | `owner`, `editor` | Crea los sobres de la plantilla (todos o `envelopeNames`) sin monto; solo en un plan sin sobres (409) |
+| `GET /plans/:planId/envelopes?month` | miembro | Sobres en orden con `assignedMinor`/`availableMinor` del mes y el `readyToAssignMinor` |
+| `POST /plans/:planId/envelopes` | `owner`, `editor` | Crea un sobre (`groupId` e `icon` opcionales) al final de su grupo |
+| `GET` · `PATCH` · `DELETE /plans/:planId/envelopes/:envelopeId` | miembro · `owner`, `editor` | Detalle; renombra, cambia ícono o mueve de grupo; borra |
+| `PUT /plans/:planId/envelopes/order` | `owner`, `editor` | Ordena los sobres de un grupo (`groupId`) o los sin grupo |
+| `POST /plans/:planId/envelopes/initial-assignment` | `owner`, `editor` | Asignación masiva (pantalla 46): una asignación por sobre y mes, todo o nada; devuelve el Listo para asignar, que puede ser negativo |
+
+- **Orden.** `position` entero por alcance (los grupos del plan, los sobres de un grupo, los sobres
+  sin grupo); las listas ordenan por `position` y las altas toman `max + 1`. Borrar un grupo manda
+  sus sobres al final de los sin grupo y renumera los grupos restantes.
+- **FKs pendientes.** La migración `CreateEnvelopes` agrega `FK_assignments_envelope` (`ON DELETE
+  CASCADE`: al borrar un sobre se van sus asignaciones y su disponible vuelve a Listo para asignar) y
+  `FK_payees_suggested_envelope` (`ON DELETE SET NULL`).
+- **Cifras.** `EnvelopesService.ledger(plan)` arma el `PlanLedger` (saldos de
+  `AccountsService.ledgerBalanceMovements`, asignaciones de `AssignmentsService.ledgerRows`) y
+  `list` llama a `CalculationService.calculateMonth`. `spending` es `[]` hasta que
+  `add-transactions` extienda ese único método; ahí también debe agregar
+  `transactions.envelope_id` con `ON DELETE SET NULL` para que un sobre borrado deje sus movimientos
+  «Sin sobre».
+- **Asignación masiva.** `AssignmentsService.setAssignments` (nuevo, aditivo) hace el mismo upsert
+  que `setAssignment` para varias filas en una transacción. El endpoint por sobre y mes y la vista
+  del mes son de `add-monthly-assignment`.
+- Autorización con `PlanAccessService` (404 si no sos miembro, 403 si sos `viewer` y escribís).
 
 ## Scripts principales
 
