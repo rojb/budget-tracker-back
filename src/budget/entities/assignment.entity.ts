@@ -27,7 +27,8 @@ export class Assignment {
   @JoinColumn({ name: 'budget_month_id' })
   budgetMonth!: Relation<BudgetMonth>;
 
-  // FK to envelopes is added by add-envelopes.
+  // FK_assignments_envelope (ON DELETE CASCADE) comes from add-envelopes: a deleted envelope takes
+  // its assignments with it.
   @Column({ name: 'envelope_id', type: 'uuid' })
   envelopeId!: string;
 
