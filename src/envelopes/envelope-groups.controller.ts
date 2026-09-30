@@ -29,12 +29,17 @@ import { PlanAccessService } from '../plans/plan-access.service.js';
 import { READ_ROLES, WRITE_ROLES } from '../plans/plan-role.js';
 import type { User } from '../users/entities/user.entity.js';
 import {
+  ApplyEnvelopeTemplateDto,
+  EnvelopeTemplateResultDto,
+} from './dto/envelope-template.dto.js';
+import {
   CreateEnvelopeGroupDto,
   EnvelopeGroupDto,
   ReorderEnvelopeGroupsDto,
   UpdateEnvelopeGroupDto,
 } from './dto/envelope-group.dto.js';
 import { EnvelopeGroupsService } from './envelope-groups.service.js';
+import { EnvelopesService } from './envelopes.service.js';
 
 const unauthorized = ApiUnauthorizedResponse({
   description: 'Missing or invalid bearer token.',
@@ -65,6 +70,7 @@ const groupIdParam = ApiParam({ name: 'groupId', format: 'uuid' });
 export class EnvelopeGroupsController {
   constructor(
     private readonly groups: EnvelopeGroupsService,
+    private readonly envelopes: EnvelopesService,
     private readonly access: PlanAccessService,
   ) {}
 
@@ -134,6 +140,33 @@ export class EnvelopeGroupsController {
   ): Promise<EnvelopeGroupDto[]> {
     await this.access.require(planId, user.id, WRITE_ROLES);
     return this.groups.reorder(planId, dto.groupIds);
+  }
+
+  @Post('template')
+  @ApiOperation({
+    operationId: 'applyEnvelopeTemplate',
+    summary: 'Create the starter template envelopes (owner or editor)',
+  })
+  @planIdParam
+  @ApiCreatedResponse({
+    description: 'The groups and envelopes of the plan.',
+    type: EnvelopeTemplateResultDto,
+  })
+  @badRequest
+  @unauthorized
+  @forbidden
+  @notFound
+  @ApiConflictResponse({
+    description: 'The plan already has envelopes.',
+    type: ErrorDto,
+  })
+  async applyTemplate(
+    @CurrentUser() user: User,
+    @Param('planId', parseUuid('planId')) planId: string,
+    @Body() dto: ApplyEnvelopeTemplateDto,
+  ): Promise<EnvelopeTemplateResultDto> {
+    await this.access.require(planId, user.id, WRITE_ROLES);
+    return this.envelopes.applyTemplate(planId, dto.envelopeNames);
   }
 
   @Patch(':groupId')

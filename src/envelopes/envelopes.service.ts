@@ -20,9 +20,12 @@ import {
   type CreateEnvelopeDto,
   type UpdateEnvelopeDto,
 } from './dto/envelope.dto.js';
+import { EnvelopeTemplateResultDto } from './dto/envelope-template.dto.js';
 import { EnvelopeGroup } from './entities/envelope-group.entity.js';
 import { Envelope } from './entities/envelope.entity.js';
+import { EnvelopeGroupsService } from './envelope-groups.service.js';
 import { DEFAULT_ENVELOPE_ICON } from './envelope-icons.js';
+import { ENVELOPE_TEMPLATE } from './envelope-template.js';
 
 // Callers check membership and role with PlanAccessService before using these methods.
 @Injectable()
@@ -37,6 +40,7 @@ export class EnvelopesService {
     private readonly calculation: CalculationService,
     private readonly assignments: AssignmentsService,
     private readonly accounts: AccountsService,
+    private readonly groupsService: EnvelopeGroupsService,
   ) {}
 
   // The plan's envelopes in display order (by group position, those without a group last) with
@@ -158,6 +162,71 @@ export class EnvelopesService {
       order: { position: 'ASC', createdAt: 'ASC' },
     });
     return reordered.map((row) => EnvelopeDto.fromEntity(row));
+  }
+
+  // Creates the selected template envelopes (all of them when `names` is absent) without any
+  // assigned amount, in template order, in one transaction. Only for a plan with no envelopes.
+  // A group of the plan with the same name (ignoring case) is reused, and a group none of whose
+  // envelopes is selected is not created.
+  async applyTemplate(
+    planId: string,
+    names?: string[],
+  ): Promise<EnvelopeTemplateResultDto> {
+    const known = ENVELOPE_TEMPLATE.flatMap((group) =>
+      group.envelopes.map((envelope) => envelope.name),
+    );
+    const selected = new Set(names ?? known);
+    const unknown = [...selected].filter((name) => !known.includes(name));
+    if (unknown.length > 0) {
+      throw new BadRequestException(
+        unknown.map((name) => `"${name}" is not an envelope of the template`),
+      );
+    }
+    await this.dataSource.transaction(async (manager) => {
+      if ((await manager.countBy(Envelope, { planId })) > 0) {
+        throw new ConflictException('The plan already has envelopes');
+      }
+      const existing = await manager.find(EnvelopeGroup, { where: { planId } });
+      let nextGroupPosition =
+        existing.reduce((max, group) => Math.max(max, group.position), -1) + 1;
+      for (const templateGroup of ENVELOPE_TEMPLATE) {
+        const members = templateGroup.envelopes.filter((envelope) =>
+          selected.has(envelope.name),
+        );
+        if (members.length === 0) {
+          continue;
+        }
+        const group =
+          existing.find(
+            (row) =>
+              row.name.toLowerCase() === templateGroup.name.toLowerCase(),
+          ) ??
+          (await manager.save(
+            manager.create(EnvelopeGroup, {
+              planId,
+              name: templateGroup.name,
+              position: nextGroupPosition++,
+            }),
+          ));
+        for (const [position, member] of members.entries()) {
+          await manager.save(
+            manager.create(Envelope, {
+              planId,
+              groupId: group.id,
+              name: member.name,
+              icon: member.icon,
+              position,
+            }),
+          );
+        }
+      }
+    });
+    const result = new EnvelopeTemplateResultDto();
+    result.groups = await this.groupsService.list(planId);
+    result.envelopes = (await this.ordered(planId)).map((row) =>
+      EnvelopeDto.fromEntity(row),
+    );
+    return result;
   }
 
   // Loading by id and plan together makes an envelope of another plan a 404.
