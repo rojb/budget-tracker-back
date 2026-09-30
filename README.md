@@ -162,6 +162,24 @@ Cambio `add-plan-sharing` (RRG-53). Módulo `src/sharing/`.
   usada y crea la membresía; el índice parcial `UQ_plan_invitations_pending` deja un solo código
   pendiente por plan.
 
+## Transferencias entre cuentas
+
+Cambio `add-account-transfers` (RRG-55). Tabla `account_transfers` del módulo `accounts` (no usa
+sobres ni beneficiarios, FR-28).
+
+| Endpoint | Rol | Qué hace |
+|---|---|---|
+| `GET /plans/:planId/transfers?accountId&page&pageSize` | miembro | Transferencias, más nuevas primero; con `accountId`, las que salen o entran a esa cuenta |
+| `POST /plans/:planId/transfers` | `owner`, `editor` | Mueve `amountMinor` (> 0) de `fromAccountId` a `toAccountId` en `occurredAt`; misma cuenta → 400, archivada → 409, de otro plan → 404 |
+| `DELETE /plans/:planId/transfers/:transferId` | `owner`, `editor` | Borra la transferencia y restaura ambos saldos |
+
+- `AccountsService.balances` ya suma transferencias (entrantes +, salientes −); `monthlyFlows`
+  (Entró/Salió de la pantalla 14) las cuenta por mes en la zona horaria del plan, y
+  `ledgerBalanceMovements` agrega el lado de cada transferencia que toca una cuenta activa (entre
+  dos activas el total no cambia).
+- `add-transactions` puede mostrar transferencias junto a los movimientos en la pantalla 10 con un
+  `UNION` sobre esta tabla.
+
 ## Scripts principales
 
 | Script | Qué hace |
