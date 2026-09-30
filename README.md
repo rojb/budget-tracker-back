@@ -53,6 +53,48 @@ Detalles de diseño:
 - Trade-off aceptado: sin refresh token, un token robado vale hasta que expire (alcance
   académico, sin despliegue).
 
+## Motor de cálculo del presupuesto
+
+Cambio `add-budget-calc-engine` (RRG-45). Módulo `src/budget/`, sin endpoints propios: lo
+consumen `add-envelopes`, `add-transactions` y `add-monthly-assignment`.
+
+- **Hechos, no agregados.** Las tablas `budget_months` y `assignments` guardan solo asignaciones
+  (una por sobre y mes, puede ser negativa). `Available`, `Carryover` y `ReadyToAssign` se
+  calculan en cada consulta (FR-11); no hay columnas derivadas.
+- **FKs pendientes.** `budget_months.plan_id` y `assignments.envelope_id` no tienen FK todavía:
+  las agregan `add-plans-and-accounts` y `add-envelopes` cuando crean `plans` y `envelopes`.
+- **`CalculationService` es puro.** Recibe un `PlanLedger` (`src/budget/calculation.types.ts`)
+  con los hechos ya atribuidos a meses y no toca la base:
+  - `balanceMovements`: saldo inicial de cada cuenta no archivada (en su mes de apertura) y cada
+    transacción sobre ella (ingreso +, gasto −, transferencia entrante + / saliente −).
+  - `assignments`: lo que devuelve `AssignmentsService.ledgerRows(planId)`.
+  - `spending`: salida neta por sobre y mes (gasto o porción de división +, ingreso directo al
+    sobre −). Ni los ingresos a *Listo para asignar* ni las transferencias van acá.
+  - `currentMonth`: `currentMonth(plan.timeZone)`; para atribuir una transacción a su mes se usa
+    `monthOfInstant(instante, plan.timeZone)` (`src/budget/month-key.ts`).
+- `calculateMonth(ledger, 'YYYY-MM')` devuelve por sobre `assigned/carryover/spent/available` y
+  los totales (`balance`, `available`, `futureAssigned`, `overspentSettled`, `readyToAssign`).
+  Para meses posteriores al actual, `readyToAssign` es el del mes actual (el sobregiro del mes en
+  curso se salda recién cuando termina).
+- `closeMonth(ledger, 'YYYY-MM')` describe el cierre hacia el mes siguiente (pantalla 25): qué se
+  arrastra, qué se descuenta y el *Listo para asignar* resultante.
+- `AssignmentsService.setAssignment(planId, envelopeId, month, amountMinor)` reemplaza la
+  asignación del sobre en ese mes (crea el `budget_month` si no existe).
+
+### Escenarios KR1
+
+Sin endpoints ni archivos de test, la verificación es reproducir los 3 escenarios de revisión
+del docente con el dataset canónico (`odd/tasks/canonical-dataset.md` del repo de specs):
+
+```bash
+npm run calc:kr1
+```
+
+Imprime, para cada valor, el esperado y el calculado: asignación a mes futuro (48.200), cierre
+septiembre → octubre (arrastres, −6.200 descontado, 42.000), edición y borrado de movimientos
+pasados con recálculo, atribución de mes en la zona del plan y el tiempo de cálculo con 2.000
+transacciones (< 100 ms). No usa base de datos ni corre en CI.
+
 ## Scripts principales
 
 | Script | Qué hace |
@@ -60,6 +102,7 @@ Detalles de diseño:
 | `npm run start:dev` | Levanta la app en modo watch |
 | `npm run build` | Compila TypeScript a `dist/` |
 | `npm run lint` | Corre `oxlint` sobre `src/` |
+| `npm run calc:kr1` | Compila y reproduce los escenarios KR1 del motor de cálculo con el dataset canónico |
 | `npm run openapi:export` | Compila y escribe `openapi.generated.json` (spec real de la API, sin base de datos; ignorado por git) |
 | `npm run migration:generate` | Genera una migración TypeORM a partir de los cambios en las entidades |
 | `npm run migration:run` | Aplica migraciones pendientes contra la base configurada en `.env` |
