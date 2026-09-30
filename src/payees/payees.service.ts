@@ -12,6 +12,7 @@ import type {
   ListPayeesQueryDto,
   UpdatePayeeDto,
 } from './dto/payee-requests.dto.js';
+import { Envelope } from '../envelopes/entities/envelope.entity.js';
 import { Payee } from './entities/payee.entity.js';
 
 const PG_UNIQUE_VIOLATION = '23505';
@@ -21,6 +22,8 @@ const PG_UNIQUE_VIOLATION = '23505';
 export class PayeesService {
   constructor(
     @InjectRepository(Payee) private readonly payees: Repository<Payee>,
+    @InjectRepository(Envelope)
+    private readonly envelopes: Repository<Envelope>,
   ) {}
 
   async list(planId: string, query: ListPayeesQueryDto): Promise<PayeePageDto> {
@@ -52,6 +55,7 @@ export class PayeesService {
   }
 
   async create(planId: string, dto: CreatePayeeDto): Promise<PayeeDto> {
+    await this.requireSuggestedEnvelope(planId, dto.suggestedEnvelopeId);
     const payee = await this.saveUnique(this.payees.create({ ...dto, planId }));
     return PayeeDto.fromEntity(payee, 0);
   }
@@ -73,6 +77,7 @@ export class PayeesService {
       ]);
     }
     const payee = await this.find(planId, payeeId, false);
+    await this.requireSuggestedEnvelope(planId, dto.suggestedEnvelopeId);
     if (dto.name !== undefined) payee.name = dto.name;
     if (dto.suggestedEnvelopeId !== undefined) {
       payee.suggestedEnvelopeId = dto.suggestedEnvelopeId;
@@ -121,6 +126,18 @@ export class PayeesService {
       throw new NotFoundException('Payee not found');
     }
     return payee;
+  }
+
+  // The suggested envelope must belong to the plan; an envelope of another plan is a 404 and
+  // nothing is saved. Deleting the envelope clears the suggestion (FK ON DELETE SET NULL).
+  private async requireSuggestedEnvelope(
+    planId: string,
+    envelopeId: string | undefined,
+  ): Promise<void> {
+    if (envelopeId === undefined) return;
+    if ((await this.envelopes.countBy({ id: envelopeId, planId })) === 0) {
+      throw new NotFoundException('Envelope not found');
+    }
   }
 
   // The partial unique index is the source of truth; a pre-check would race.
