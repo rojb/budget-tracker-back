@@ -53,6 +53,133 @@ Detalles de diseño:
 - Trade-off aceptado: sin refresh token, un token robado vale hasta que expire (alcance
   académico, sin despliegue).
 
+## Motor de cálculo del presupuesto
+
+Cambio `add-budget-calc-engine` (RRG-45). Módulo `src/budget/`, sin endpoints propios: lo
+consumen `add-envelopes`, `add-transactions` y `add-monthly-assignment`.
+
+- **Hechos, no agregados.** Las tablas `budget_months` y `assignments` guardan solo asignaciones
+  (una por sobre y mes, puede ser negativa). `Available`, `Carryover` y `ReadyToAssign` se
+  calculan en cada consulta (FR-11); no hay columnas derivadas.
+- **FKs pendientes.** `budget_months.plan_id` y `assignments.envelope_id` no tienen FK todavía:
+  las agregan `add-plans-and-accounts` y `add-envelopes` cuando crean `plans` y `envelopes`.
+- **`CalculationService` es puro.** Recibe un `PlanLedger` (`src/budget/calculation.types.ts`)
+  con los hechos ya atribuidos a meses y no toca la base:
+  - `balanceMovements`: saldo inicial de cada cuenta no archivada (en su mes de apertura) y cada
+    transacción sobre ella (ingreso +, gasto −, transferencia entrante + / saliente −).
+  - `assignments`: lo que devuelve `AssignmentsService.ledgerRows(planId)`.
+  - `spending`: salida neta por sobre y mes (gasto o porción de división +, ingreso directo al
+    sobre −). Ni los ingresos a *Listo para asignar* ni las transferencias van acá.
+  - `currentMonth`: `currentMonth(plan.timeZone)`; para atribuir una transacción a su mes se usa
+    `monthOfInstant(instante, plan.timeZone)` (`src/budget/month-key.ts`).
+- `calculateMonth(ledger, 'YYYY-MM')` devuelve por sobre `assigned/carryover/spent/available` y
+  los totales (`balance`, `available`, `futureAssigned`, `overspentSettled`, `readyToAssign`).
+  Para meses posteriores al actual, `readyToAssign` es el del mes actual (el sobregiro del mes en
+  curso se salda recién cuando termina).
+- `closeMonth(ledger, 'YYYY-MM')` describe el cierre hacia el mes siguiente (pantalla 25): qué se
+  arrastra, qué se descuenta y el *Listo para asignar* resultante.
+- `AssignmentsService.setAssignment(planId, envelopeId, month, amountMinor)` reemplaza la
+  asignación del sobre en ese mes (crea el `budget_month` si no existe).
+
+### Escenarios KR1
+
+Sin endpoints ni archivos de test, la verificación es reproducir los 3 escenarios de revisión
+del docente con el dataset canónico (`odd/tasks/canonical-dataset.md` del repo de specs):
+
+```bash
+npm run calc:kr1
+```
+
+Imprime, para cada valor, el esperado y el calculado: asignación a mes futuro (48.200), cierre
+septiembre → octubre (arrastres, −6.200 descontado, 42.000), edición y borrado de movimientos
+pasados con recálculo, atribución de mes en la zona del plan y el tiempo de cálculo con 2.000
+transacciones (< 100 ms). No usa base de datos ni corre en CI.
+
+## Planes y cuentas
+
+Cambio `add-plans-and-accounts` (RRG-46). Módulos `src/plans/` y `src/accounts/`.
+
+| Endpoint | Rol | Qué hace |
+|---|---|---|
+| `GET /plans` | cualquier sesión | Planes de los que soy miembro, con moneda, zona horaria, mi rol y miembros |
+| `POST /plans` | cualquier sesión | Crea el plan (quien lo crea queda `owner`) y, opcional, su primera cuenta, en una transacción |
+| `GET /plans/:planId` | miembro | Detalle del plan |
+| `PATCH /plans/:planId` | `owner` | Renombra; la moneda es inmutable (mandarla es un 400) |
+| `DELETE /plans/:planId` | `owner` | Borra el plan y todo lo que cuelga de él (cascada) |
+| `GET /plans/:planId/accounts?archived=` | miembro | Cuentas activas, o archivadas con `archived=true` |
+| `POST /plans/:planId/accounts` | `owner`, `editor` | Crea una cuenta (`bank`, `digitalWallet`, `cash`) con saldo inicial |
+| `GET /plans/:planId/accounts/:accountId?month=` | miembro | Cuenta + lo que entró y salió en el mes |
+| `PATCH /plans/:planId/accounts/:accountId` | `owner`, `editor` | Edita nombre, tipo o saldo inicial |
+| `POST /plans/:planId/accounts/:accountId/archive` · `/restore` | `owner`, `editor` | Archiva o restaura (409 si ya estaba así). No hay borrado |
+
+- **Autorización por plan.** `PlanAccessService.require(planId, userId, roles)` (exportado por
+  `PlansModule`) es lo primero que llama todo endpoint con `planId`: si no sos miembro → 404 (no
+  revela qué planes existen); si tu rol no alcanza → 403. Roles en `src/plans/plan-role.ts`:
+  `READ_ROLES` (todos), `WRITE_ROLES` (`owner`, `editor`), `OWNER_ROLES`. Los módulos futuros
+  (sobres, beneficiarios, movimientos) importan `PlansModule` y usan lo mismo.
+- **Saldo derivado.** `AccountsService.balances(planId)` calcula saldo inicial + movimientos; hoy,
+  sin tabla de transacciones, es el saldo inicial. `add-transactions` extiende ese único método (y
+  `monthlyFlows`) con sus filas. `ledgerBalanceMovements(planId, timeZone)` devuelve los saldos
+  iniciales de las cuentas no archivadas para el `PlanLedger` del motor.
+- La migración agrega la FK pendiente `budget_months.plan_id → plans`.
+
+## Beneficiarios
+
+Cambio `add-payees` (RRG-48). Módulo `src/payees/`.
+
+| Endpoint | Rol | Qué hace |
+|---|---|---|
+| `GET /plans/:planId/payees?q&page&pageSize` | miembro | Beneficiarios activos por nombre, paginados; `q` filtra sin distinguir mayúsculas |
+| `POST /plans/:planId/payees` | `owner`, `editor` | Crea; nombre repetido (ignorando mayúsculas) entre los activos → 409 |
+| `GET /plans/:planId/payees/:payeeId` | miembro | Detalle, también de uno borrado (`deleted: true`) para que los movimientos viejos lo muestren |
+| `PATCH /plans/:planId/payees/:payeeId` | `owner`, `editor` | Cambia nombre o sobre sugerido de uno activo |
+| `DELETE /plans/:planId/payees/:payeeId` | `owner`, `editor` | Baja lógica (`deleted_at`): sale de la lista pero los movimientos pasados lo conservan (FR-05) |
+
+- La unicidad la garantiza el índice parcial `UQ_payees_plan_name_active` (solo activos), así que
+  después de borrar "Coto" se puede crear otro "Coto".
+- `PayeesService.findOrCreate(planId, name)` (exportado) devuelve el beneficiario activo con ese
+  nombre o lo crea: pensado para `add-transactions` (pantalla 26 y alta al primer uso).
+- `transactionCounts(planId)` devuelve 0 para todos hasta que `add-transactions` lo reemplace por un
+  `GROUP BY payee_id`. `suggested_envelope_id` no tiene FK todavía: la agrega `add-envelopes`.
+
+## Planes compartidos
+
+Cambio `add-plan-sharing` (RRG-53). Módulo `src/sharing/`.
+
+| Endpoint | Quién | Qué hace |
+|---|---|---|
+| `GET /plans/:planId/invitation` | `owner` | Código activo (404 si no hay) |
+| `POST /plans/:planId/invitation` | `owner` | Genera un código (`editor` o `viewer`), 24 h, un solo uso; revoca el anterior |
+| `DELETE /plans/:planId/invitation` | `owner` | Revoca el código activo |
+| `GET /invitations/:code` | cualquier sesión | Vista previa: plan, titular, moneda, rol, vencimiento (sin montos ni emails) |
+| `POST /invitations/:code/accept` | cualquier sesión | Se une con el rol del código; 409 si ya es miembro o el plan tiene 5 |
+| `PATCH /plans/:planId/members/:userId` | `owner` | Cambia el rol entre `editor` y `viewer` |
+| `DELETE /plans/:planId/members/:userId` | `owner`, o el propio miembro | Quita a un miembro o sale del plan; la titular no puede salir (409) |
+
+- Código de 6 caracteres sin ambiguos (`src/sharing/invitation-code.ts`), guardado sin guion y en
+  mayúsculas; se acepta `k7m4qx` o `K7M-4QX`. El enlace del QR es `https://sobres.app/unirse/<CODE>`.
+- Uso único: `accept` bloquea la fila (`SELECT ... FOR UPDATE`) en la misma transacción que la marca
+  usada y crea la membresía; el índice parcial `UQ_plan_invitations_pending` deja un solo código
+  pendiente por plan.
+
+## Transferencias entre cuentas
+
+Cambio `add-account-transfers` (RRG-55). Tabla `account_transfers` del módulo `accounts` (no usa
+sobres ni beneficiarios, FR-28).
+
+| Endpoint | Rol | Qué hace |
+|---|---|---|
+| `GET /plans/:planId/transfers?accountId&page&pageSize` | miembro | Transferencias, más nuevas primero; con `accountId`, las que salen o entran a esa cuenta |
+| `POST /plans/:planId/transfers` | `owner`, `editor` | Mueve `amountMinor` (> 0) de `fromAccountId` a `toAccountId` en `occurredAt`; misma cuenta → 400, archivada → 409, de otro plan → 404 |
+| `DELETE /plans/:planId/transfers/:transferId` | `owner`, `editor` | Borra la transferencia y restaura ambos saldos |
+
+- `AccountsService.balances` ya suma transferencias (entrantes +, salientes −); `monthlyFlows`
+  (Entró/Salió de la pantalla 14) las cuenta por mes en la zona horaria del plan, y
+  `ledgerBalanceMovements` agrega el lado de cada transferencia que toca una cuenta activa (entre
+  dos activas el total no cambia).
+- `add-transactions` puede mostrar transferencias junto a los movimientos en la pantalla 10 con un
+  `UNION` sobre esta tabla.
+
 ## Scripts principales
 
 | Script | Qué hace |
@@ -60,6 +187,7 @@ Detalles de diseño:
 | `npm run start:dev` | Levanta la app en modo watch |
 | `npm run build` | Compila TypeScript a `dist/` |
 | `npm run lint` | Corre `oxlint` sobre `src/` |
+| `npm run calc:kr1` | Compila y reproduce los escenarios KR1 del motor de cálculo con el dataset canónico |
 | `npm run openapi:export` | Compila y escribe `openapi.generated.json` (spec real de la API, sin base de datos; ignorado por git) |
 | `npm run migration:generate` | Genera una migración TypeORM a partir de los cambios en las entidades |
 | `npm run migration:run` | Aplica migraciones pendientes contra la base configurada en `.env` |
