@@ -68,6 +68,13 @@ export class EnvelopeLineDto {
 
   @ApiProperty({
     type: 'integer',
+    description:
+      'Net outflow of the month (expenses minus income sent to the envelope); negative when income exceeds expenses.',
+  })
+  spentMinor!: number;
+
+  @ApiProperty({
+    type: 'integer',
     description: 'Assigned + carryover − spent; negative when overspent.',
   })
   availableMinor!: number;

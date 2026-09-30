@@ -13,6 +13,7 @@ import type {
   UpdatePayeeDto,
 } from './dto/payee-requests.dto.js';
 import { Envelope } from '../envelopes/entities/envelope.entity.js';
+import { TransactionLedgerService } from '../transactions/transaction-ledger.service.js';
 import { Payee } from './entities/payee.entity.js';
 
 const PG_UNIQUE_VIOLATION = '23505';
@@ -24,6 +25,7 @@ export class PayeesService {
     @InjectRepository(Payee) private readonly payees: Repository<Payee>,
     @InjectRepository(Envelope)
     private readonly envelopes: Repository<Envelope>,
+    private readonly transactions: TransactionLedgerService,
   ) {}
 
   async list(planId: string, query: ListPayeesQueryDto): Promise<PayeePageDto> {
@@ -106,10 +108,9 @@ export class PayeesService {
     );
   }
 
-  // Transactions per payee. The transactions table does not exist yet, so every count is 0;
-  // add-transactions replaces this body with a GROUP BY payee_id over its table.
-  transactionCounts(_planId: string): Promise<Map<string, number>> {
-    return Promise.resolve(new Map());
+  // Transactions per payee, deleted payees included.
+  transactionCounts(planId: string): Promise<Map<string, number>> {
+    return this.transactions.payeeCounts(planId);
   }
 
   private async find(

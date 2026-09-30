@@ -8,6 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Not, Repository } from 'typeorm';
 import type { LedgerAmount } from '../budget/calculation.types.js';
 import { monthOfInstant, type MonthKey } from '../budget/month-key.js';
+import { TransactionLedgerService } from '../transactions/transaction-ledger.service.js';
 import { AccountDetailDto, AccountDto } from './dto/account.dto.js';
 import type { CreateAccountDto } from './dto/create-account.dto.js';
 import type { UpdateAccountDto } from './dto/update-account.dto.js';
@@ -21,6 +22,7 @@ export class AccountsService {
     @InjectRepository(Account) private readonly accounts: Repository<Account>,
     @InjectRepository(AccountTransfer)
     private readonly transfers: Repository<AccountTransfer>,
+    private readonly transactions: TransactionLedgerService,
   ) {}
 
   async list(planId: string, archived: boolean): Promise<AccountDto[]> {
@@ -95,7 +97,7 @@ export class AccountsService {
   }
 
   // Derived balance of every account of the plan: opening balance plus incoming minus outgoing
-  // transfers (and, once add-transactions extends this method, the signed transaction amounts).
+  // transfers plus the signed transaction amounts (income +, expense −).
   async balances(planId: string): Promise<Map<string, number>> {
     const rows = await this.accounts.find({
       select: { id: true, openingBalanceMinor: true },
@@ -121,13 +123,18 @@ export class AccountsService {
         (balances.get(flow.accountId) ?? 0) + Number(flow.net),
       );
     }
+    for (const [accountId, net] of await this.transactions.netByAccount(
+      planId,
+    )) {
+      balances.set(accountId, (balances.get(accountId) ?? 0) + net);
+    }
     return balances;
   }
 
   // Changes to the sum of balances of non-archived accounts, by month in the plan's time zone,
-  // for the budget engine's PlanLedger.balanceMovements: opening balances in their opening month
-  // and each transfer side that touches an active account (a transfer between two active
-  // accounts nets to zero). add-transactions adds its own rows.
+  // for the budget engine's PlanLedger.balanceMovements: opening balances in their opening month,
+  // each transfer side that touches an active account (a transfer between two active accounts
+  // nets to zero) and the transactions of the active accounts.
   async ledgerBalanceMovements(
     planId: string,
     timeZone: string,
@@ -151,11 +158,16 @@ export class AccountsService {
         movements.push({ month, amountMinor: -transfer.amountMinor });
       }
     }
+    movements.push(
+      ...(await this.transactions.balanceMovements(planId, timeZone, [
+        ...active,
+      ])),
+    );
     return movements;
   }
 
-  // Money that entered and left the account in the month (plan time zone). Today only transfers;
-  // add-transactions adds its rows.
+  // Money that entered and left the account in the month (plan time zone): transfers and
+  // transactions.
   private async monthlyFlows(
     accountId: string,
     month: MonthKey,
@@ -170,9 +182,10 @@ export class AccountsService {
            AND to_char(t.occurred_at AT TIME ZONE p.time_zone, 'YYYY-MM') = $2`,
         [accountId, month],
       );
+    const flows = await this.transactions.monthlyFlows(accountId, month);
     return {
-      inflowMinor: Number(row.inflow),
-      outflowMinor: Number(row.outflow),
+      inflowMinor: Number(row.inflow) + flows.inflowMinor,
+      outflowMinor: Number(row.outflow) + flows.outflowMinor,
     };
   }
 

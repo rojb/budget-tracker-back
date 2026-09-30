@@ -13,6 +13,7 @@ import type { PlanLedger } from '../budget/calculation.types.js';
 import { currentMonth, type MonthKey } from '../budget/month-key.js';
 import { isUniqueViolation } from '../common/database/unique-violation.js';
 import { Plan } from '../plans/entities/plan.entity.js';
+import { TransactionLedgerService } from '../transactions/transaction-ledger.service.js';
 import {
   EnvelopeDto,
   EnvelopeLineDto,
@@ -45,6 +46,7 @@ export class EnvelopesService {
     private readonly assignments: AssignmentsService,
     private readonly accounts: AccountsService,
     private readonly groupsService: EnvelopeGroupsService,
+    private readonly transactions: TransactionLedgerService,
   ) {}
 
   // The plan's envelopes in display order (by group position, those without a group last) with
@@ -62,14 +64,15 @@ export class EnvelopesService {
       const line = new EnvelopeLineDto();
       line.envelope = EnvelopeDto.fromEntity(row);
       line.assignedMinor = state.envelopes[index].assignedMinor;
+      line.spentMinor = state.envelopes[index].spentMinor;
       line.availableMinor = state.envelopes[index].availableMinor;
       return line;
     });
     return result;
   }
 
-  // Facts of the plan in PlanLedger form. `add-transactions` extends this single method with its
-  // balance movements and `spending` rows; until then no envelope has any spending.
+  // Facts of the plan in PlanLedger form: the balance movements (opening balances, transfers and
+  // transactions), the assignments and the spending that transactions put on the envelopes.
   async ledger(plan: Plan, rows?: Envelope[]): Promise<PlanLedger> {
     const envelopes = rows ?? (await this.ordered(plan.id));
     return {
@@ -80,7 +83,7 @@ export class EnvelopesService {
         plan.timeZone,
       ),
       assignments: await this.assignments.ledgerRows(plan.id),
-      spending: [],
+      spending: await this.transactions.spending(plan.id, plan.timeZone),
     };
   }
 
@@ -127,8 +130,8 @@ export class EnvelopesService {
   }
 
   // The envelope's assignments go with it (FK ON DELETE CASCADE), so its money returns to Ready
-  // to Assign; payees that suggested it lose the suggestion (ON DELETE SET NULL). Transactions
-  // will keep existing without an envelope once add-transactions references envelopes the same way.
+  // to Assign; payees that suggested it lose the suggestion (ON DELETE SET NULL). Transactions keep
+  // existing: their portions that used it lose the envelope (ON DELETE SET NULL, "Sin sobre").
   async remove(planId: string, envelopeId: string): Promise<void> {
     await this.find(planId, envelopeId);
     await this.envelopes.delete({ id: envelopeId, planId });
