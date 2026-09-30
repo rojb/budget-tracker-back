@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   ACCOUNT_TYPES,
   type Account,
@@ -25,8 +25,12 @@ export class AccountDto {
   @ApiProperty()
   archived!: boolean;
 
-  @ApiProperty({ type: 'string', format: 'date-time', nullable: true })
-  archivedAt!: string | null;
+  @ApiPropertyOptional({
+    format: 'date-time',
+    description:
+      'When the account was archived; present only while `archived` is true.',
+  })
+  archivedAt?: string;
 
   @ApiProperty({ format: 'date-time' })
   createdAt!: string;
@@ -46,7 +50,9 @@ export class AccountDto {
     dto.openingBalanceMinor = account.openingBalanceMinor;
     dto.balanceMinor = balanceMinor;
     dto.archived = account.archivedAt !== null;
-    dto.archivedAt = account.archivedAt?.toISOString() ?? null;
+    if (account.archivedAt) {
+      dto.archivedAt = account.archivedAt.toISOString();
+    }
     dto.createdAt = account.createdAt.toISOString();
     return dto;
   }
