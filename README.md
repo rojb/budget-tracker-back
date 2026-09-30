@@ -95,6 +95,34 @@ septiembre → octubre (arrastres, −6.200 descontado, 42.000), edición y borr
 pasados con recálculo, atribución de mes en la zona del plan y el tiempo de cálculo con 2.000
 transacciones (< 100 ms). No usa base de datos ni corre en CI.
 
+## Planes y cuentas
+
+Cambio `add-plans-and-accounts` (RRG-46). Módulos `src/plans/` y `src/accounts/`.
+
+| Endpoint | Rol | Qué hace |
+|---|---|---|
+| `GET /plans` | cualquier sesión | Planes de los que soy miembro, con moneda, zona horaria, mi rol y miembros |
+| `POST /plans` | cualquier sesión | Crea el plan (quien lo crea queda `owner`) y, opcional, su primera cuenta, en una transacción |
+| `GET /plans/:planId` | miembro | Detalle del plan |
+| `PATCH /plans/:planId` | `owner` | Renombra; la moneda es inmutable (mandarla es un 400) |
+| `DELETE /plans/:planId` | `owner` | Borra el plan y todo lo que cuelga de él (cascada) |
+| `GET /plans/:planId/accounts?archived=` | miembro | Cuentas activas, o archivadas con `archived=true` |
+| `POST /plans/:planId/accounts` | `owner`, `editor` | Crea una cuenta (`bank`, `digitalWallet`, `cash`) con saldo inicial |
+| `GET /plans/:planId/accounts/:accountId?month=` | miembro | Cuenta + lo que entró y salió en el mes |
+| `PATCH /plans/:planId/accounts/:accountId` | `owner`, `editor` | Edita nombre, tipo o saldo inicial |
+| `POST /plans/:planId/accounts/:accountId/archive` · `/restore` | `owner`, `editor` | Archiva o restaura (409 si ya estaba así). No hay borrado |
+
+- **Autorización por plan.** `PlanAccessService.require(planId, userId, roles)` (exportado por
+  `PlansModule`) es lo primero que llama todo endpoint con `planId`: si no sos miembro → 404 (no
+  revela qué planes existen); si tu rol no alcanza → 403. Roles en `src/plans/plan-role.ts`:
+  `READ_ROLES` (todos), `WRITE_ROLES` (`owner`, `editor`), `OWNER_ROLES`. Los módulos futuros
+  (sobres, beneficiarios, movimientos) importan `PlansModule` y usan lo mismo.
+- **Saldo derivado.** `AccountsService.balances(planId)` calcula saldo inicial + movimientos; hoy,
+  sin tabla de transacciones, es el saldo inicial. `add-transactions` extiende ese único método (y
+  `monthlyFlows`) con sus filas. `ledgerBalanceMovements(planId, timeZone)` devuelve los saldos
+  iniciales de las cuentas no archivadas para el `PlanLedger` del motor.
+- La migración agrega la FK pendiente `budget_months.plan_id → plans`.
+
 ## Scripts principales
 
 | Script | Qué hace |

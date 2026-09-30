@@ -1,10 +1,12 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AccountsModule } from './accounts/accounts.module.js';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
 import { AuthModule } from './auth/auth.module.js';
 import { BudgetModule } from './budget/budget.module.js';
+import { PlansModule } from './plans/plans.module.js';
 import { envValidationSchema } from './config/env.validation.js';
 import { UsersModule } from './users/users.module.js';
 
@@ -30,6 +32,8 @@ import { UsersModule } from './users/users.module.js';
     UsersModule,
     AuthModule,
     BudgetModule,
+    PlansModule,
+    AccountsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
