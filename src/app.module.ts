@@ -10,6 +10,7 @@ import { EnvelopesModule } from './envelopes/envelopes.module.js';
 import { PayeesModule } from './payees/payees.module.js';
 import { PlansModule } from './plans/plans.module.js';
 import { SharingModule } from './sharing/sharing.module.js';
+import { TransactionsModule } from './transactions/transactions.module.js';
 import { envValidationSchema } from './config/env.validation.js';
 import { UsersModule } from './users/users.module.js';
 
@@ -39,6 +40,7 @@ import { UsersModule } from './users/users.module.js';
     AccountsModule,
     PayeesModule,
     EnvelopesModule,
+    TransactionsModule,
     SharingModule,
   ],
   controllers: [AppController],

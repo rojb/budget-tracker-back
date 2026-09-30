@@ -117,10 +117,11 @@ Cambio `add-plans-and-accounts` (RRG-46). Módulos `src/plans/` y `src/accounts/
   revela qué planes existen); si tu rol no alcanza → 403. Roles en `src/plans/plan-role.ts`:
   `READ_ROLES` (todos), `WRITE_ROLES` (`owner`, `editor`), `OWNER_ROLES`. Los módulos futuros
   (sobres, beneficiarios, movimientos) importan `PlansModule` y usan lo mismo.
-- **Saldo derivado.** `AccountsService.balances(planId)` calcula saldo inicial + movimientos; hoy,
-  sin tabla de transacciones, es el saldo inicial. `add-transactions` extiende ese único método (y
-  `monthlyFlows`) con sus filas. `ledgerBalanceMovements(planId, timeZone)` devuelve los saldos
-  iniciales de las cuentas no archivadas para el `PlanLedger` del motor.
+- **Saldo derivado.** `AccountsService.balances(planId)` calcula saldo inicial + transferencias +
+  transacciones (`add-transactions` llena ese método, `monthlyFlows` y `ledgerBalanceMovements` a
+  través de `TransactionLedgerService`). `ledgerBalanceMovements(planId, timeZone)` devuelve para el
+  `PlanLedger` del motor los saldos iniciales, las transferencias y las transacciones de las cuentas
+  no archivadas.
 - La migración agrega la FK pendiente `budget_months.plan_id → plans`.
 
 ## Beneficiarios
@@ -138,10 +139,12 @@ Cambio `add-payees` (RRG-48). Módulo `src/payees/`.
 - La unicidad la garantiza el índice parcial `UQ_payees_plan_name_active` (solo activos), así que
   después de borrar "Coto" se puede crear otro "Coto".
 - `PayeesService.findOrCreate(planId, name)` (exportado) devuelve el beneficiario activo con ese
-  nombre o lo crea: pensado para `add-transactions` (pantalla 26 y alta al primer uso).
-- `transactionCounts(planId)` devuelve 0 para todos hasta que `add-transactions` lo reemplace por un
-  `GROUP BY payee_id`. `suggested_envelope_id` tiene FK a `envelopes` (`ON DELETE SET NULL`, cambio
-  `add-envelopes`) y el servicio valida que el sobre sea del plan (otro plan → 404).
+  nombre o lo crea: lo usa `add-transactions` cuando un movimiento trae `payeeName` (alta al primer
+  uso).
+- `transactionCounts(planId)` cuenta las transacciones por beneficiario (`GROUP BY payee_id` en
+  `TransactionLedgerService`, también los borrados). `suggested_envelope_id` tiene FK a `envelopes`
+  (`ON DELETE SET NULL`, cambio `add-envelopes`) y el servicio valida que el sobre sea del plan (otro
+  plan → 404).
 
 ## Planes compartidos
 
@@ -178,8 +181,8 @@ sobres ni beneficiarios, FR-28).
   (Entró/Salió de la pantalla 14) las cuenta por mes en la zona horaria del plan, y
   `ledgerBalanceMovements` agrega el lado de cada transferencia que toca una cuenta activa (entre
   dos activas el total no cambia).
-- `add-transactions` puede mostrar transferencias junto a los movimientos en la pantalla 10 con un
-  `UNION` sobre esta tabla.
+- Las transferencias no son transacciones: `GET /transactions` no las lista y la pantalla 14 las
+  junta con los movimientos en el cliente.
 
 ## Sobres y grupos
 
@@ -194,7 +197,7 @@ Cambio `add-envelopes` (RRG-47). Módulo `src/envelopes/` (FR-04).
 | `DELETE /plans/:planId/envelope-groups/:groupId` | `owner`, `editor` | Borra el grupo; sus sobres quedan «Sin grupo» (al final, sin perder asignaciones) |
 | `PUT /plans/:planId/envelope-groups/order` | `owner`, `editor` | Ordena: `groupIds` debe traer todos los grupos una vez (si no, 400) |
 | `POST /plans/:planId/envelope-groups/template` | `owner`, `editor` | Crea los sobres de la plantilla (todos o `envelopeNames`) sin monto; solo en un plan sin sobres (409) |
-| `GET /plans/:planId/envelopes?month` | miembro | Sobres en orden con `assignedMinor`/`availableMinor` del mes y el `readyToAssignMinor` |
+| `GET /plans/:planId/envelopes?month` | miembro | Sobres en orden con `assignedMinor`/`spentMinor`/`availableMinor` del mes y el `readyToAssignMinor` |
 | `POST /plans/:planId/envelopes` | `owner`, `editor` | Crea un sobre (`groupId` e `icon` opcionales) al final de su grupo |
 | `GET` · `PATCH` · `DELETE /plans/:planId/envelopes/:envelopeId` | miembro · `owner`, `editor` | Detalle; renombra, cambia ícono o mueve de grupo; borra |
 | `PUT /plans/:planId/envelopes/order` | `owner`, `editor` | Ordena los sobres de un grupo (`groupId`) o los sin grupo |
@@ -208,14 +211,39 @@ Cambio `add-envelopes` (RRG-47). Módulo `src/envelopes/` (FR-04).
   `FK_payees_suggested_envelope` (`ON DELETE SET NULL`).
 - **Cifras.** `EnvelopesService.ledger(plan)` arma el `PlanLedger` (saldos de
   `AccountsService.ledgerBalanceMovements`, asignaciones de `AssignmentsService.ledgerRows`) y
-  `list` llama a `CalculationService.calculateMonth`. `spending` es `[]` hasta que
-  `add-transactions` extienda ese único método; ahí también debe agregar
-  `transactions.envelope_id` con `ON DELETE SET NULL` para que un sobre borrado deje sus movimientos
-  «Sin sobre».
+  `list` llama a `CalculationService.calculateMonth`. `spending` sale de
+  `TransactionLedgerService.spending` (`add-transactions`); un sobre borrado deja sus porciones sin
+  sobre (`transaction_splits.envelope_id` con `ON DELETE SET NULL`, «Sin sobre»).
 - **Asignación masiva.** `AssignmentsService.setAssignments` (nuevo, aditivo) hace el mismo upsert
   que `setAssignment` para varias filas en una transacción. El endpoint por sobre y mes y la vista
   del mes son de `add-monthly-assignment`.
 - Autorización con `PlanAccessService` (404 si no sos miembro, 403 si sos `viewer` y escribís).
+
+## Movimientos
+
+Cambio `add-transactions` (RRG-49). Módulo `src/transactions/` (FR-06, FR-07, FR-08, FR-14).
+
+| Endpoint | Rol | Qué hace |
+|---|---|---|
+| `POST /plans/:planId/transactions` | `owner`, `editor` | Registra un gasto o ingreso: `direction`, `accountId`, `amountMinor` (> 0), `occurredAt` (con offset) y opcionales `payeeId` o `payeeName`, `description`, `envelopeId` o `splits` |
+| `GET /plans/:planId/transactions?accountId&page&pageSize` | miembro | Movimientos, más nuevos primero (`occurredAt`, luego alta), paginados; con `accountId`, los de esa cuenta |
+
+- **Destino.** Un gasto lleva `envelopeId` o `splits` (2 a 20 porciones que suman exactamente
+  `amountMinor`, si no 400); un ingreso lleva `envelopeId` o nada, y sin sobre va a Listo para
+  asignar. `splits` en un ingreso, `envelopeId` con `splits` o `payeeId` con `payeeName` → 400.
+  Cuenta archivada → 409; cuenta, sobre o beneficiario de otro plan (o borrado) → 404.
+- **Modelo.** `transactions` + `transaction_splits`: toda transacción tiene al menos una porción; un
+  ingreso a Listo para asignar es una porción sin sobre, y borrar un sobre deja sus porciones con
+  `envelope_id NULL` («Sin sobre», sin actividad para ningún sobre). La cuenta y el beneficiario no
+  se borran (se archivan / dan de baja lógica), así que sus FKs no tienen cascada; borrar el plan
+  borra todo.
+- **Lectura.** `TransactionLedgerService` (`TransactionLedgerModule`, módulo hoja sin dependencias)
+  es el único que conoce el signo (ingreso +, gasto −) y el mes en la zona del plan
+  (`to_char(occurred_at AT TIME ZONE plan.time_zone, 'YYYY-MM')`). Alimenta tres lugares:
+  `AccountsService` (`balances`, `ledgerBalanceMovements`, `monthlyFlows`), `EnvelopesService.ledger`
+  (`spending`, por lo que el motor de cálculo no cambia) y `PayeesService.transactionCounts`.
+- **Alta del beneficiario.** `payeeName` llama a `PayeesService.findOrCreate`: reutiliza el activo
+  con ese nombre (sin distinguir mayúsculas) o lo crea.
 
 ## Scripts principales
 
