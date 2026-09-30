@@ -3,10 +3,12 @@ import type {
   EnvelopeAmount,
   EnvelopeMonthState,
   LedgerAmount,
+  MonthClose,
   MonthState,
   PlanLedger,
 } from './calculation.types.js';
 import {
+  addMonths,
   assertMonthKey,
   compareMonths,
   monthRange,
@@ -86,6 +88,38 @@ export class CalculationService {
       futureAssignedMinor: target.futureAssignedMinor,
       overspentSettledMinor: target.overspentSettledMinor,
       readyToAssignMinor,
+    };
+  }
+
+  // Close of `month` into the next one (screen 25): positive Available carries over, negative
+  // Available is deducted from the next month's Ready to Assign. Uses the settled formula for
+  // the next month even if it is still in the future.
+  closeMonth(ledger: PlanLedger, month: MonthKey): MonthClose {
+    assertMonthKey(month);
+    const toMonth = addMonths(month, 1);
+    const figures = this.walk(ledger, toMonth);
+    const from = figures.get(month)!;
+    const to = figures.get(toMonth)!;
+    const carried = from.envelopes
+      .filter((envelope) => envelope.availableMinor > 0)
+      .map(({ envelopeId, availableMinor }) => ({
+        envelopeId,
+        amountMinor: availableMinor,
+      }));
+    const deducted = from.envelopes
+      .filter((envelope) => envelope.availableMinor < 0)
+      .map(({ envelopeId, availableMinor }) => ({
+        envelopeId,
+        amountMinor: -availableMinor,
+      }));
+    return {
+      fromMonth: month,
+      toMonth,
+      carried,
+      deducted,
+      totalDeductedMinor: from.overspentMinor,
+      readyToAssignFromMinor: from.readyToAssignMinor,
+      readyToAssignToMinor: to.readyToAssignMinor,
     };
   }
 
