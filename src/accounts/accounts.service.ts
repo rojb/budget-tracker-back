@@ -11,6 +11,7 @@ import { monthOfInstant, type MonthKey } from '../budget/month-key.js';
 import { AccountDetailDto, AccountDto } from './dto/account.dto.js';
 import type { CreateAccountDto } from './dto/create-account.dto.js';
 import type { UpdateAccountDto } from './dto/update-account.dto.js';
+import { AccountTransfer } from './entities/account-transfer.entity.js';
 import { Account } from './entities/account.entity.js';
 
 // Callers check membership and role with PlanAccessService before using these methods.
@@ -18,6 +19,8 @@ import { Account } from './entities/account.entity.js';
 export class AccountsService {
   constructor(
     @InjectRepository(Account) private readonly accounts: Repository<Account>,
+    @InjectRepository(AccountTransfer)
+    private readonly transfers: Repository<AccountTransfer>,
   ) {}
 
   async list(planId: string, archived: boolean): Promise<AccountDto[]> {
@@ -91,38 +94,86 @@ export class AccountsService {
     return this.toDto(await this.accounts.save(account));
   }
 
-  // Derived balance of every account of the plan: opening balance plus the signed amounts of
-  // its transactions. The transactions table does not exist yet, so today it is the opening
-  // balance; add-transactions extends this single query (and monthlyFlows) with its rows.
+  // Derived balance of every account of the plan: opening balance plus incoming minus outgoing
+  // transfers (and, once add-transactions extends this method, the signed transaction amounts).
   async balances(planId: string): Promise<Map<string, number>> {
     const rows = await this.accounts.find({
       select: { id: true, openingBalanceMinor: true },
       where: { planId },
     });
-    return new Map(rows.map((row) => [row.id, row.openingBalanceMinor]));
+    const balances = new Map(
+      rows.map((row) => [row.id, row.openingBalanceMinor]),
+    );
+    const flows: { accountId: string; net: string }[] =
+      await this.transfers.query(
+        `SELECT account_id AS "accountId", SUM(amount)::text AS net FROM (
+         SELECT to_account_id AS account_id, amount_minor AS amount
+           FROM account_transfers WHERE plan_id = $1
+         UNION ALL
+         SELECT from_account_id, -amount_minor
+           FROM account_transfers WHERE plan_id = $1
+       ) t GROUP BY account_id`,
+        [planId],
+      );
+    for (const flow of flows) {
+      balances.set(
+        flow.accountId,
+        (balances.get(flow.accountId) ?? 0) + Number(flow.net),
+      );
+    }
+    return balances;
   }
 
-  // Opening balance of every non-archived account in its opening month, for the budget
-  // engine's PlanLedger.balanceMovements (transactions are added by their own module).
+  // Changes to the sum of balances of non-archived accounts, by month in the plan's time zone,
+  // for the budget engine's PlanLedger.balanceMovements: opening balances in their opening month
+  // and each transfer side that touches an active account (a transfer between two active
+  // accounts nets to zero). add-transactions adds its own rows.
   async ledgerBalanceMovements(
     planId: string,
     timeZone: string,
   ): Promise<LedgerAmount[]> {
-    const rows = await this.accounts.find({
-      where: { planId, archivedAt: IsNull() },
-    });
-    return rows.map((row) => ({
-      month: monthOfInstant(row.createdAt, timeZone),
-      amountMinor: row.openingBalanceMinor,
-    }));
+    const rows = await this.accounts.find({ where: { planId } });
+    const active = new Set(
+      rows.filter((row) => row.archivedAt === null).map((row) => row.id),
+    );
+    const movements: LedgerAmount[] = rows
+      .filter((row) => active.has(row.id))
+      .map((row) => ({
+        month: monthOfInstant(row.createdAt, timeZone),
+        amountMinor: row.openingBalanceMinor,
+      }));
+    for (const transfer of await this.transfers.findBy({ planId })) {
+      const month = monthOfInstant(transfer.occurredAt, timeZone);
+      if (active.has(transfer.toAccountId)) {
+        movements.push({ month, amountMinor: transfer.amountMinor });
+      }
+      if (active.has(transfer.fromAccountId)) {
+        movements.push({ month, amountMinor: -transfer.amountMinor });
+      }
+    }
+    return movements;
   }
 
-  // Money that entered and left the account in the month; 0 until add-transactions.
-  private monthlyFlows(
-    _accountId: string,
-    _month: MonthKey,
+  // Money that entered and left the account in the month (plan time zone). Today only transfers;
+  // add-transactions adds its rows.
+  private async monthlyFlows(
+    accountId: string,
+    month: MonthKey,
   ): Promise<{ inflowMinor: number; outflowMinor: number }> {
-    return Promise.resolve({ inflowMinor: 0, outflowMinor: 0 });
+    const [row]: { inflow: string; outflow: string }[] =
+      await this.transfers.query(
+        `SELECT
+           COALESCE(SUM(t.amount_minor) FILTER (WHERE t.to_account_id = $1), 0)::text AS inflow,
+           COALESCE(SUM(t.amount_minor) FILTER (WHERE t.from_account_id = $1), 0)::text AS outflow
+         FROM account_transfers t JOIN plans p ON p.id = t.plan_id
+         WHERE (t.to_account_id = $1 OR t.from_account_id = $1)
+           AND to_char(t.occurred_at AT TIME ZONE p.time_zone, 'YYYY-MM') = $2`,
+        [accountId, month],
+      );
+    return {
+      inflowMinor: Number(row.inflow),
+      outflowMinor: Number(row.outflow),
+    };
   }
 
   // Loading by id and plan together makes an id from another plan a 404.
