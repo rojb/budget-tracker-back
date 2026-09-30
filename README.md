@@ -123,6 +123,25 @@ Cambio `add-plans-and-accounts` (RRG-46). Módulos `src/plans/` y `src/accounts/
   iniciales de las cuentas no archivadas para el `PlanLedger` del motor.
 - La migración agrega la FK pendiente `budget_months.plan_id → plans`.
 
+## Beneficiarios
+
+Cambio `add-payees` (RRG-48). Módulo `src/payees/`.
+
+| Endpoint | Rol | Qué hace |
+|---|---|---|
+| `GET /plans/:planId/payees?q&page&pageSize` | miembro | Beneficiarios activos por nombre, paginados; `q` filtra sin distinguir mayúsculas |
+| `POST /plans/:planId/payees` | `owner`, `editor` | Crea; nombre repetido (ignorando mayúsculas) entre los activos → 409 |
+| `GET /plans/:planId/payees/:payeeId` | miembro | Detalle, también de uno borrado (`deleted: true`) para que los movimientos viejos lo muestren |
+| `PATCH /plans/:planId/payees/:payeeId` | `owner`, `editor` | Cambia nombre o sobre sugerido de uno activo |
+| `DELETE /plans/:planId/payees/:payeeId` | `owner`, `editor` | Baja lógica (`deleted_at`): sale de la lista pero los movimientos pasados lo conservan (FR-05) |
+
+- La unicidad la garantiza el índice parcial `UQ_payees_plan_name_active` (solo activos), así que
+  después de borrar "Coto" se puede crear otro "Coto".
+- `PayeesService.findOrCreate(planId, name)` (exportado) devuelve el beneficiario activo con ese
+  nombre o lo crea: pensado para `add-transactions` (pantalla 26 y alta al primer uso).
+- `transactionCounts(planId)` devuelve 0 para todos hasta que `add-transactions` lo reemplace por un
+  `GROUP BY payee_id`. `suggested_envelope_id` no tiene FK todavía: la agrega `add-envelopes`.
+
 ## Scripts principales
 
 | Script | Qué hace |
