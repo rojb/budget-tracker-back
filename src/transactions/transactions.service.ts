@@ -11,7 +11,12 @@ import { Envelope } from '../envelopes/entities/envelope.entity.js';
 import { Payee } from '../payees/entities/payee.entity.js';
 import { PayeesService } from '../payees/payees.service.js';
 import type { CreateTransactionDto } from './dto/create-transaction.dto.js';
-import { TransactionDto, TransactionSplitDto } from './dto/transaction.dto.js';
+import {
+  type ListTransactionsQueryDto,
+  TransactionDto,
+  TransactionPageDto,
+  TransactionSplitDto,
+} from './dto/transaction.dto.js';
 import { TransactionSplit } from './entities/transaction-split.entity.js';
 import { Transaction } from './entities/transaction.entity.js';
 
@@ -86,6 +91,59 @@ export class TransactionsService {
       ),
       { accountName: account.name, payeeName: payee?.name },
     );
+  }
+
+  // Newest first by the instant of the movement, then by when it was recorded.
+  async list(
+    planId: string,
+    query: ListTransactionsQueryDto,
+  ): Promise<TransactionPageDto> {
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 20;
+    const builder = this.transactions
+      .createQueryBuilder('transaction')
+      .innerJoinAndSelect('transaction.account', 'account')
+      .leftJoinAndSelect('transaction.payee', 'payee')
+      .where('transaction.planId = :planId', { planId });
+    if (query.accountId) {
+      builder.andWhere('transaction.accountId = :accountId', {
+        accountId: query.accountId,
+      });
+    }
+    const [rows, total] = await builder
+      .orderBy('transaction.occurredAt', 'DESC')
+      .addOrderBy('transaction.createdAt', 'DESC')
+      .addOrderBy('transaction.id', 'DESC')
+      .skip((page - 1) * pageSize)
+      .take(pageSize)
+      .getManyAndCount();
+    const portions = rows.length
+      ? await this.splits.find({
+          where: { transactionId: In(rows.map((row) => row.id)) },
+          relations: { envelope: true },
+          order: { position: 'ASC' },
+        })
+      : [];
+    const result = new TransactionPageDto();
+    result.page = page;
+    result.pageSize = pageSize;
+    result.total = total;
+    result.items = rows.map((row) =>
+      TransactionDto.fromEntity(
+        row,
+        portions
+          .filter((portion) => portion.transactionId === row.id)
+          .map((portion) =>
+            this.splitDto(
+              portion.envelopeId,
+              portion.envelope?.name,
+              portion.amountMinor,
+            ),
+          ),
+        { accountName: row.account.name, payeeName: row.payee?.name },
+      ),
+    );
+    return result;
   }
 
   // Structural rules of the request; nothing is read from the database yet.

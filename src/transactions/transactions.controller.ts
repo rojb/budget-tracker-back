@@ -1,10 +1,11 @@
-import { Body, Controller, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiConflictResponse,
   ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiNotFoundResponse,
+  ApiOkResponse,
   ApiOperation,
   ApiParam,
   ApiTags,
@@ -14,10 +15,14 @@ import { CurrentUser } from '../auth/current-user.decorator.js';
 import { ErrorDto, ValidationErrorDto } from '../common/dto/error.dto.js';
 import { parseUuid } from '../common/pipes/parse-uuid.pipe.js';
 import { PlanAccessService } from '../plans/plan-access.service.js';
-import { WRITE_ROLES } from '../plans/plan-role.js';
+import { READ_ROLES, WRITE_ROLES } from '../plans/plan-role.js';
 import type { User } from '../users/entities/user.entity.js';
 import { CreateTransactionDto } from './dto/create-transaction.dto.js';
-import { TransactionDto } from './dto/transaction.dto.js';
+import {
+  ListTransactionsQueryDto,
+  TransactionDto,
+  TransactionPageDto,
+} from './dto/transaction.dto.js';
 import { TransactionsService } from './transactions.service.js';
 
 const unauthorized = ApiUnauthorizedResponse({
@@ -45,6 +50,30 @@ export class TransactionsController {
     private readonly transactions: TransactionsService,
     private readonly access: PlanAccessService,
   ) {}
+
+  @Get()
+  @ApiOperation({
+    operationId: 'listTransactions',
+    summary: 'List transactions (movements)',
+    description:
+      'Newest first by `occurredAt` (ties by creation instant); with `accountId`, only the transactions recorded on that account. Transfers between accounts are not transactions and are not listed here.',
+  })
+  @planIdParam
+  @ApiOkResponse({
+    description: 'A page of transactions.',
+    type: TransactionPageDto,
+  })
+  @badRequest
+  @unauthorized
+  @notFound
+  async list(
+    @CurrentUser() user: User,
+    @Param('planId', parseUuid('planId')) planId: string,
+    @Query() query: ListTransactionsQueryDto,
+  ): Promise<TransactionPageDto> {
+    await this.access.require(planId, user.id, READ_ROLES);
+    return this.transactions.list(planId, query);
+  }
 
   @Post()
   @ApiOperation({
