@@ -1,5 +1,6 @@
 import {
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -11,7 +12,11 @@ import {
   MoreThan,
   QueryFailedError,
 } from 'typeorm';
-import { CurrencyDto, type PlanDto } from '../plans/dto/plan.dto.js';
+import {
+  CurrencyDto,
+  type PlanDto,
+  PlanMemberDto,
+} from '../plans/dto/plan.dto.js';
 import { PlanMember } from '../plans/entities/plan-member.entity.js';
 import { Plan } from '../plans/entities/plan.entity.js';
 import { PlansService } from '../plans/plans.service.js';
@@ -140,6 +145,53 @@ export class SharingService {
       return invitation.planId;
     });
     return this.plans.get(planId, userId);
+  }
+
+  // Owner only (checked by the caller): editor <-> viewer; the owner's role never changes.
+  async updateMember(
+    planId: string,
+    userId: string,
+    role: InvitationRole,
+  ): Promise<PlanMemberDto> {
+    const members = this.dataSource.getRepository(PlanMember);
+    const member = await members.findOne({
+      where: { planId, userId },
+      relations: { user: true },
+    });
+    if (!member) {
+      throw new NotFoundException('Member not found');
+    }
+    if (member.role === 'owner') {
+      throw new ConflictException("The owner's membership cannot be changed");
+    }
+    member.role = role;
+    await members.save(member);
+    return PlanMemberDto.fromEntity(member);
+  }
+
+  // The owner removes another member, or a member leaves (removes themself). `callerRole` is
+  // the caller's role in the plan, already loaded by PlanAccessService.
+  async removeMember(
+    planId: string,
+    callerId: string,
+    callerRole: string,
+    userId: string,
+  ): Promise<void> {
+    const leaving = callerId === userId;
+    if (!leaving && callerRole !== 'owner') {
+      throw new ForbiddenException(
+        'Your role in this plan does not allow this action',
+      );
+    }
+    const members = this.dataSource.getRepository(PlanMember);
+    const member = await members.findOneBy({ planId, userId });
+    if (!member) {
+      throw new NotFoundException('Member not found');
+    }
+    if (member.role === 'owner') {
+      throw new ConflictException("The owner's membership cannot be changed");
+    }
+    await members.delete({ planId, userId });
   }
 
   private findActive(

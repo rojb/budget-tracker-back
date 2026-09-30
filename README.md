@@ -142,6 +142,26 @@ Cambio `add-payees` (RRG-48). Módulo `src/payees/`.
 - `transactionCounts(planId)` devuelve 0 para todos hasta que `add-transactions` lo reemplace por un
   `GROUP BY payee_id`. `suggested_envelope_id` no tiene FK todavía: la agrega `add-envelopes`.
 
+## Planes compartidos
+
+Cambio `add-plan-sharing` (RRG-53). Módulo `src/sharing/`.
+
+| Endpoint | Quién | Qué hace |
+|---|---|---|
+| `GET /plans/:planId/invitation` | `owner` | Código activo (404 si no hay) |
+| `POST /plans/:planId/invitation` | `owner` | Genera un código (`editor` o `viewer`), 24 h, un solo uso; revoca el anterior |
+| `DELETE /plans/:planId/invitation` | `owner` | Revoca el código activo |
+| `GET /invitations/:code` | cualquier sesión | Vista previa: plan, titular, moneda, rol, vencimiento (sin montos ni emails) |
+| `POST /invitations/:code/accept` | cualquier sesión | Se une con el rol del código; 409 si ya es miembro o el plan tiene 5 |
+| `PATCH /plans/:planId/members/:userId` | `owner` | Cambia el rol entre `editor` y `viewer` |
+| `DELETE /plans/:planId/members/:userId` | `owner`, o el propio miembro | Quita a un miembro o sale del plan; la titular no puede salir (409) |
+
+- Código de 6 caracteres sin ambiguos (`src/sharing/invitation-code.ts`), guardado sin guion y en
+  mayúsculas; se acepta `k7m4qx` o `K7M-4QX`. El enlace del QR es `https://sobres.app/unirse/<CODE>`.
+- Uso único: `accept` bloquea la fila (`SELECT ... FOR UPDATE`) en la misma transacción que la marca
+  usada y crea la membresía; el índice parcial `UQ_plan_invitations_pending` deja un solo código
+  pendiente por plan.
+
 ## Scripts principales
 
 | Script | Qué hace |
