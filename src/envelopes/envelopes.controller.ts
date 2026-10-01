@@ -32,6 +32,10 @@ import type { User } from '../users/entities/user.entity.js';
 import { EnvelopeDetailDto } from './dto/envelope-detail.dto.js';
 import { EnvelopeGoalDto } from './dto/envelope-goal.dto.js';
 import {
+  MoveMoneyRequestDto,
+  MoveMoneyResultDto,
+} from './dto/move-money.dto.js';
+import {
   CreateEnvelopeDto,
   EnvelopeDto,
   EnvelopeListDto,
@@ -168,6 +172,38 @@ export class EnvelopesController {
   ): Promise<InitialAssignmentResultDto> {
     await this.access.require(planId, user.id, WRITE_ROLES);
     return this.envelopes.assignInitial(planId, dto);
+  }
+
+  @Post('move')
+  @HttpCode(200)
+  @ApiOperation({
+    operationId: 'moveMoney',
+    summary: 'Move money between two envelopes inside a month (owner or editor)',
+    description:
+      "Subtracts the amount from the source's assignment of the month and adds it to the destination's, atomically and without creating a transaction. Ready to Assign, the other envelopes and the other months do not change. The amount cannot exceed the source's Available in that month (`409`).",
+  })
+  @planIdParam
+  @ApiOkResponse({
+    description:
+      'The month, its Ready to Assign and the updated lines of both envelopes.',
+    type: MoveMoneyResultDto,
+  })
+  @badRequest
+  @unauthorized
+  @forbidden
+  @notFound
+  @ApiConflictResponse({
+    description:
+      "The amount is greater than the source envelope's Available in the month; nothing was moved.",
+    type: ErrorDto,
+  })
+  async move(
+    @CurrentUser() user: User,
+    @Param('planId', parseUuid('planId')) planId: string,
+    @Body() dto: MoveMoneyRequestDto,
+  ): Promise<MoveMoneyResultDto> {
+    await this.access.require(planId, user.id, WRITE_ROLES);
+    return this.envelopes.moveMoney(planId, dto);
   }
 
   @Get(':envelopeId')

@@ -23,6 +23,10 @@ import { TransactionsService } from '../transactions/transactions.service.js';
 import { EnvelopeDetailDto } from './dto/envelope-detail.dto.js';
 import { EnvelopeGoalDto } from './dto/envelope-goal.dto.js';
 import {
+  MoveMoneyResultDto,
+  type MoveMoneyRequestDto,
+} from './dto/move-money.dto.js';
+import {
   EnvelopeDto,
   EnvelopeLineDto,
   EnvelopeListDto,
@@ -284,6 +288,61 @@ export class EnvelopesService {
       0,
     );
     result.readyToAssignMinor = state.readyToAssignMinor;
+    return result;
+  }
+
+  // Move money (FR-25, screen 24): takes the amount from the source's assignment of the month and
+  // gives it to the destination's, as one atomic change of the budget engine's assignment facts, so
+  // Ready to Assign and every other envelope and month stay as they were. The amount cannot be
+  // more than the source has available in the month (carryover included): 24 shows no overspent
+  // source, and overspending is a state that spending causes, not a move.
+  async moveMoney(
+    planId: string,
+    dto: MoveMoneyRequestDto,
+  ): Promise<MoveMoneyResultDto> {
+    if (dto.fromEnvelopeId === dto.toEnvelopeId) {
+      throw new BadRequestException([
+        'fromEnvelopeId and toEnvelopeId must be different envelopes',
+      ]);
+    }
+    const plan = await this.plans.findOneByOrFail({ id: planId });
+    const month: MonthKey = dto.month ?? currentMonth(plan.timeZone);
+    const rows = await this.ordered(planId);
+    const fromIndex = rows.findIndex((row) => row.id === dto.fromEnvelopeId);
+    const toIndex = rows.findIndex((row) => row.id === dto.toEnvelopeId);
+    if (fromIndex < 0 || toIndex < 0) {
+      throw new NotFoundException('Envelope not found');
+    }
+    const before = this.calculation.calculateMonth(
+      await this.ledger(plan, rows),
+      month,
+    );
+    if (dto.amountMinor > before.envelopes[fromIndex].availableMinor) {
+      throw new ConflictException(
+        'The source envelope has less available than the amount',
+      );
+    }
+    await this.assignments.shiftAssignments(planId, month, [
+      { envelopeId: dto.fromEnvelopeId, deltaMinor: -dto.amountMinor },
+      { envelopeId: dto.toEnvelopeId, deltaMinor: dto.amountMinor },
+    ]);
+    const after = this.calculation.calculateMonth(
+      await this.ledger(plan, rows),
+      month,
+    );
+    const result = new MoveMoneyResultDto();
+    result.month = month;
+    result.readyToAssignMinor = after.readyToAssignMinor;
+    result.from = EnvelopeLineDto.build(
+      rows[fromIndex],
+      after.envelopes[fromIndex],
+      month,
+    );
+    result.to = EnvelopeLineDto.build(
+      rows[toIndex],
+      after.envelopes[toIndex],
+      month,
+    );
     return result;
   }
 
