@@ -228,7 +228,7 @@ export class EnvelopesController {
     operationId: 'getEnvelopeDetail',
     summary: 'Get an envelope with the figures and the activity of a month',
     description:
-      "The envelope line of the month (figures, state, goal status), its carryover and the month's transactions that have a portion on the envelope, newest first, at most 100.",
+      "The envelope line of the month (figures, state, goal status), its carryover and the month's transactions that have a portion on the envelope, newest first by `createdAt` (ties by id), at most 100.",
   })
   @planIdParam
   @envelopeIdParam

@@ -226,7 +226,7 @@ Cambio `add-transactions` (RRG-49). Módulo `src/transactions/` (FR-06, FR-07, F
 | Endpoint | Rol | Qué hace |
 |---|---|---|
 | `POST /plans/:planId/transactions` | `owner`, `editor` | Registra un gasto o ingreso: `direction`, `accountId`, `amountMinor` (> 0), `occurredAt` (con offset) y opcionales `payeeId` o `payeeName`, `description`, `envelopeId` o `splits` |
-| `GET /plans/:planId/transactions?accountId&payeeId&envelopeId&direction&from&to&timeFrom&timeTo&q&page&pageSize` | miembro | Movimientos no eliminados, más nuevos primero (`occurredAt`, luego alta), paginados y filtrados; la respuesta trae `summary` (`outflowMinor`, `inflowMinor`) |
+| `GET /plans/:planId/transactions?accountId&payeeId&envelopeId&direction&from&to&timeFrom&timeTo&q&page&pageSize` | miembro | Movimientos no eliminados, el último registrado primero (`createdAt`, luego `id`; `occurredAt` sigue decidiendo mes, saldos y filtros de fecha), paginados y filtrados; la respuesta trae `summary` (`outflowMinor`, `inflowMinor`) |
 | `PUT /plans/:planId/transactions/:transactionId` | `owner`, `editor` | Edita: reemplaza todos los campos editables y las porciones con el mismo cuerpo que el alta; responde `{ transaction, affectedMonths }` |
 | `DELETE /plans/:planId/transactions/:transactionId` | `owner`, `editor` | Baja lógica (`deleted_at`); responde `{ affectedMonths }` |
 | `POST /plans/:planId/transactions/:transactionId/restore` | `owner`, `editor` | Deshace la baja: devuelve la misma transacción (mismo `id`, alta, porciones); responde `{ transaction, affectedMonths }` |

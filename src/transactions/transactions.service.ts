@@ -109,7 +109,8 @@ export class TransactionsService {
     );
   }
 
-  // Newest first by the instant of the movement, then by when it was recorded.
+  // Newest first by when it was recorded, whatever date the movement carries; `occurredAt`
+  // still decides months, balances and the date filters.
   async list(
     planId: string,
     query: ListTransactionsQueryDto,
@@ -127,8 +128,7 @@ export class TransactionsService {
     );
     const summary = await this.summary(planId, query);
     const [rows, total] = await builder
-      .orderBy('transaction.occurredAt', 'DESC')
-      .addOrderBy('transaction.createdAt', 'DESC')
+      .orderBy('transaction.createdAt', 'DESC')
       .addOrderBy('transaction.id', 'DESC')
       .skip((page - 1) * pageSize)
       .take(pageSize)

@@ -21,7 +21,7 @@ export class EnvelopeDetailDto {
   @ApiProperty({
     type: [TransactionDto],
     description:
-      'Transactions of the month with a portion on the envelope, newest first, at most 100.',
+      'Transactions of the month with a portion on the envelope, newest first by `createdAt` (ties by id), at most 100.',
   })
   activity!: TransactionDto[];
 

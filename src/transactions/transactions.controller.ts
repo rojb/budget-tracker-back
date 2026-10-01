@@ -69,7 +69,7 @@ export class TransactionsController {
     operationId: 'listTransactions',
     summary: 'List transactions (movements)',
     description:
-      "Newest first by `occurredAt` (ties by creation instant). Transactions that were deleted are not listed. Every filter is optional and they combine with AND. Dates and times are local to the plan's time zone. `summary` totals every matching transaction (not only the page) with its whole amount. Transfers between accounts are not transactions and are not listed here.",
+      "Newest first by registration instant, `createdAt` (ties by id): the transaction recorded last comes first, whatever `occurredAt` it carries. `occurredAt` still decides the month, the balances and the date and time filters. Transactions that were deleted are not listed. Every filter is optional and they combine with AND. Dates and times are local to the plan's time zone. `summary` totals every matching transaction (not only the page) with its whole amount. Transfers between accounts are not transactions and are not listed here.",
   })
   @planIdParam
   @ApiOkResponse({

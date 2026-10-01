@@ -73,8 +73,8 @@ export class TransfersService {
       );
     }
     const [rows, total] = await builder
-      .orderBy('transfer.occurredAt', 'DESC')
-      .addOrderBy('transfer.createdAt', 'DESC')
+      .orderBy('transfer.createdAt', 'DESC')
+      .addOrderBy('transfer.id', 'DESC')
       .skip((page - 1) * pageSize)
       .take(pageSize)
       .getManyAndCount();
