@@ -128,6 +128,11 @@ check(
   oct.balanceMinor - oct.availableMinor - oct.futureAssignedMinor,
   oct.readyToAssignMinor,
 );
+check(
+  'Cuadre del cierre (pantalla 25)',
+  close.readyToAssignToMinor,
+  close.toBalanceMinor - close.toAvailableMinor - close.toFutureAssignedMinor,
+);
 
 // --- KR1-3: edición y borrado con recálculo ----------------------------------------------
 section('KR1-3 — Edición y borrado de movimientos pasados (FR-13)');

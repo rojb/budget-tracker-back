@@ -70,4 +70,9 @@ export interface MonthClose {
   totalDeductedMinor: number;
   readyToAssignFromMinor: number;
   readyToAssignToMinor: number;
+  // toMonth's own figures, so balance − available − futureAssigned = readyToAssignTo (the check
+  // of screen 25).
+  toBalanceMinor: number;
+  toAvailableMinor: number;
+  toFutureAssignedMinor: number;
 }
