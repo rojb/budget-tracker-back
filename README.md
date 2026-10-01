@@ -333,6 +333,24 @@ confirmación del cierre.
   confirmó el cierre (pantalla 25), para no volver a mostrarlo.
 - Mes inválido (`2026-13`, `2026-9`) → 400; sobre de otro plan → 404.
 
+## Reportes
+
+Cambio `add-reports` (RRG-54). Módulo `src/reports/` (FR-26), solo lectura y sin migración.
+
+| Endpoint | Rol | Qué hace |
+|---|---|---|
+| `GET /plans/:planId/reports/spending?from&to` | miembro | Por mes: lo gastado de cada sobre (gastos menos ingresos al sobre), solo los que gastaron, de mayor a menor, y el total |
+| `GET /plans/:planId/reports/income-expense?from&to` | miembro | Por mes: suma de ingresos y de gastos del plan (las transferencias no cuentan) |
+| `GET /plans/:planId/reports/net-worth?from&to` | miembro | Por mes: Σ saldos de las cuentas activas al cierre del mes |
+
+- **Rango.** `from` y `to` son meses `YYYY-MM`; sin `to`, el mes actual del plan; sin `from`, cinco
+  meses antes de `to`. `from > to` o más de 24 meses → 400. Siempre devuelve un elemento por mes,
+  con 0 en los meses sin movimientos.
+- **Mismas fuentes que el resto de la app.** El gasto sale de `TransactionLedgerService.spending`,
+  el patrimonio de `AccountsService.ledgerBalanceMovements` (acumulado desde el primer movimiento) e
+  ingresos/gastos de una lectura agrupada de `transactions`; todo por mes en la zona horaria del
+  plan y sin los movimientos borrados.
+
 ## Scripts principales
 
 | Script | Qué hace |
