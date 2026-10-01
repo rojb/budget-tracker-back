@@ -3,9 +3,10 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, In, IsNull, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, IsNull, Repository } from 'typeorm';
 import { AccountsService } from '../accounts/accounts.service.js';
 import { AssignmentsService } from '../budget/assignments.service.js';
 import { CalculationService } from '../budget/calculation.service.js';
@@ -67,9 +68,6 @@ const NO_GOAL: GoalColumns = {
 // Callers check membership and role with PlanAccessService before using these methods.
 @Injectable()
 export class EnvelopesService {
-  // Moves of a plan waiting for their turn (see serialized).
-  private readonly queues = new Map<string, Promise<void>>();
-
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     @InjectRepository(Envelope)
@@ -156,9 +154,7 @@ export class EnvelopesService {
     if (dto.groupId) {
       await this.requireGroup(planId, dto.groupId);
     }
-    const goal = dto.goal
-      ? await this.goalColumns(planId, dto.goal)
-      : NO_GOAL;
+    const goal = dto.goal ? await this.goalColumns(planId, dto.goal) : NO_GOAL;
     const envelope = await this.saveUnique(
       this.envelopes.create({
         planId,
@@ -305,7 +301,7 @@ export class EnvelopesService {
   // Ready to Assign and every other envelope and month stay as they were. The amount cannot be
   // more than the source has available in the month (carryover included): 24 shows no overspent
   // source, and overspending is a state that spending causes, not a move. (An expense recorded at
-  // the same instant is not serialized with a move and can still leave the source overspent.)
+  // the same instant does not take that lock and can still leave the source overspent.)
   async moveMoney(
     planId: string,
     dto: MoveMoneyRequestDto,
@@ -323,9 +319,9 @@ export class EnvelopesService {
     if (fromIndex < 0 || toIndex < 0) {
       throw new NotFoundException('Envelope not found');
     }
-    // The check and the change of two moves of the same plan run one after the other, so the second
-    // one sees the first one's result and they can never both spend the same available money.
-    await this.serialized(planId, async () => {
+    // The check and the change run under the row lock of the source envelope, in one transaction,
+    // so two moves out of the same envelope cannot both spend the same available money.
+    await this.lockingSource(dto.fromEnvelopeId, async (manager) => {
       const before = this.calculation.calculateMonth(
         await this.ledger(plan, rows),
         month,
@@ -335,10 +331,15 @@ export class EnvelopesService {
           'The source envelope has less available than the amount',
         );
       }
-      await this.assignments.shiftAssignments(planId, month, [
-        { envelopeId: dto.fromEnvelopeId, deltaMinor: -dto.amountMinor },
-        { envelopeId: dto.toEnvelopeId, deltaMinor: dto.amountMinor },
-      ]);
+      await this.assignments.shiftAssignments(
+        planId,
+        month,
+        [
+          { envelopeId: dto.fromEnvelopeId, deltaMinor: -dto.amountMinor },
+          { envelopeId: dto.toEnvelopeId, deltaMinor: dto.amountMinor },
+        ],
+        manager,
+      );
     });
     const after = this.calculation.calculateMonth(
       await this.ledger(plan, rows),
@@ -425,23 +426,43 @@ export class EnvelopesService {
     return result;
   }
 
-  // Runs `work` after the work already queued for `key` has finished (a failure does not block the
-  // queue). The app runs as one process, so an in-memory queue is enough, and it holds no database
-  // connection while it waits (a lock held in a transaction would starve the pool under load).
-  private serialized<T>(key: string, work: () => Promise<T>): Promise<T> {
-    const previous = this.queues.get(key) ?? Promise.resolve();
-    const result = previous.then(work, work);
-    const tail = result.then(
-      () => undefined,
-      () => undefined,
-    );
-    this.queues.set(key, tail);
-    void tail.then(() => {
-      if (this.queues.get(key) === tail) {
-        this.queues.delete(key);
+  // Runs `work` in a database transaction that holds the row lock of the source envelope
+  // (SELECT ... FOR UPDATE NOWAIT), so two moves out of the same envelope never overlap: the second
+  // starts only after the first committed and sees its result. A move that finds the row locked
+  // gives its connection back and retries after a short pause instead of waiting on it, so
+  // waiting moves never hold pool connections that the running one needs for its reads.
+  private async lockingSource<T>(
+    envelopeId: string,
+    work: (manager: EntityManager) => Promise<T>,
+  ): Promise<T> {
+    for (let attempt = 0; attempt < 400; attempt++) {
+      const runner = this.dataSource.createQueryRunner();
+      await runner.connect();
+      await runner.startTransaction();
+      try {
+        await runner.query(
+          'SELECT "id" FROM "envelopes" WHERE "id" = $1 FOR UPDATE NOWAIT',
+          [envelopeId],
+        );
+        const result = await work(runner.manager);
+        await runner.commitTransaction();
+        return result;
+      } catch (error) {
+        await runner.rollbackTransaction().catch(() => undefined);
+        // 55P03: the row is locked by another move; anything else is a real error.
+        if ((error as { code?: string }).code !== '55P03') {
+          throw error;
+        }
+      } finally {
+        await runner.release();
       }
-    });
-    return result;
+      await new Promise((resolve) =>
+        setTimeout(resolve, 5 + Math.random() * 15),
+      );
+    }
+    throw new ServiceUnavailableException(
+      'Too many moves in progress, try again',
+    );
   }
 
   // Loading by id and plan together makes an envelope of another plan a 404.

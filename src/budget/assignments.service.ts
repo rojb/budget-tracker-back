@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 import type { EnvelopeAmount } from './calculation.types.js';
 import { Assignment } from './entities/assignment.entity.js';
 import { BudgetMonth } from './entities/budget-month.entity.js';
@@ -108,6 +108,7 @@ export class AssignmentsService {
     planId: string,
     month: MonthKey,
     deltas: { envelopeId: string; deltaMinor: number }[],
+    outer?: EntityManager,
   ): Promise<void> {
     assertMonthKey(month);
     for (const row of deltas) {
@@ -123,7 +124,10 @@ export class AssignmentsService {
     const ordered = [...deltas].sort((a, b) =>
       a.envelopeId.localeCompare(b.envelopeId),
     );
-    await this.dataSource.transaction(async (manager) => {
+    // Inside the caller's transaction when it holds one (a move locks its source first).
+    const run = <T>(work: (manager: EntityManager) => Promise<T>) =>
+      outer ? work(outer) : this.dataSource.transaction(work);
+    await run(async (manager) => {
       await manager
         .createQueryBuilder()
         .insert()
