@@ -8,10 +8,10 @@ export class CurrencyDto {
   @ApiProperty({ enum: CURRENCY_CODES })
   code!: CurrencyCode;
 
-  @ApiProperty({ enum: ['$', 'US$', '€'] })
+  @ApiProperty({ enum: ['$', 'US$', '€', 'Bs.'] })
   symbol!: string;
 
-  @ApiProperty({ enum: ['pesos', 'dólares', 'euros'] })
+  @ApiProperty({ enum: ['pesos', 'dólares', 'euros', 'bolivianos'] })
   name!: string;
 
   @ApiProperty({ type: 'integer', enum: [0, 2] })
