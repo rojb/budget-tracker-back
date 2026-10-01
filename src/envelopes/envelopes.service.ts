@@ -17,7 +17,10 @@ import {
 } from '../budget/month-key.js';
 import { isUniqueViolation } from '../common/database/unique-violation.js';
 import { Plan } from '../plans/entities/plan.entity.js';
+import { ListTransactionsQueryDto } from '../transactions/dto/transaction.dto.js';
 import { TransactionLedgerService } from '../transactions/transaction-ledger.service.js';
+import { TransactionsService } from '../transactions/transactions.service.js';
+import { EnvelopeDetailDto } from './dto/envelope-detail.dto.js';
 import { EnvelopeGoalDto } from './dto/envelope-goal.dto.js';
 import {
   EnvelopeDto,
@@ -43,6 +46,13 @@ interface GoalColumns {
   goalDueDate: string | null;
 }
 
+// Last calendar day of a YYYY-MM month.
+function daysInMonth(month: MonthKey): number {
+  return new Date(
+    Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0),
+  ).getUTCDate();
+}
+
 const NO_GOAL: GoalColumns = {
   goalType: null,
   goalTargetMinor: null,
@@ -64,6 +74,7 @@ export class EnvelopesService {
     private readonly accounts: AccountsService,
     private readonly groupsService: EnvelopeGroupsService,
     private readonly transactions: TransactionLedgerService,
+    private readonly transactionsService: TransactionsService,
   ) {}
 
   // The plan's envelopes in display order (by group position, those without a group last) with
@@ -80,6 +91,39 @@ export class EnvelopesService {
     result.items = rows.map((row, index) =>
       EnvelopeLineDto.build(row, state.envelopes[index], key),
     );
+    return result;
+  }
+
+  // One envelope of a month (FR-24): its line (figures, state, goal status), its carryover and the
+  // month's activity, asked from the transactions list so the plan's time zone and the logical
+  // deletion are applied by the code that owns them.
+  async detail(
+    planId: string,
+    envelopeId: string,
+    month?: string,
+  ): Promise<EnvelopeDetailDto> {
+    const envelope = await this.find(planId, envelopeId);
+    const plan = await this.plans.findOneByOrFail({ id: planId });
+    const key: MonthKey = month ?? currentMonth(plan.timeZone);
+    const rows = await this.ordered(planId);
+    const state = this.calculation.calculateMonth(
+      await this.ledger(plan, rows),
+      key,
+    );
+    const index = rows.findIndex((row) => row.id === envelope.id);
+    const query = new ListTransactionsQueryDto();
+    query.envelopeId = envelope.id;
+    query.from = `${key}-01`;
+    query.to = `${key}-${String(daysInMonth(key)).padStart(2, '0')}`;
+    query.page = 1;
+    query.pageSize = 100;
+    const activity = await this.transactionsService.list(planId, query);
+    const result = new EnvelopeDetailDto();
+    result.month = key;
+    result.line = EnvelopeLineDto.build(envelope, state.envelopes[index], key);
+    result.carryoverMinor = state.envelopes[index].carryoverMinor;
+    result.activity = activity.items;
+    result.activityTotal = activity.total;
     return result;
   }
 

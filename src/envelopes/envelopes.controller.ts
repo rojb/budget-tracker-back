@@ -29,6 +29,7 @@ import { parseUuid } from '../common/pipes/parse-uuid.pipe.js';
 import { PlanAccessService } from '../plans/plan-access.service.js';
 import { READ_ROLES, WRITE_ROLES } from '../plans/plan-role.js';
 import type { User } from '../users/entities/user.entity.js';
+import { EnvelopeDetailDto } from './dto/envelope-detail.dto.js';
 import { EnvelopeGoalDto } from './dto/envelope-goal.dto.js';
 import {
   CreateEnvelopeDto,
@@ -184,6 +185,32 @@ export class EnvelopesController {
   ): Promise<EnvelopeDto> {
     await this.access.require(planId, user.id, READ_ROLES);
     return this.envelopes.get(planId, envelopeId);
+  }
+
+  @Get(':envelopeId/detail')
+  @ApiOperation({
+    operationId: 'getEnvelopeDetail',
+    summary: 'Get an envelope with the figures and the activity of a month',
+    description:
+      "The envelope line of the month (figures, state, goal status), its carryover and the month's transactions that have a portion on the envelope, newest first, at most 100.",
+  })
+  @planIdParam
+  @envelopeIdParam
+  @ApiOkResponse({
+    description: 'The envelope detail.',
+    type: EnvelopeDetailDto,
+  })
+  @badRequest
+  @unauthorized
+  @notFound
+  async detail(
+    @CurrentUser() user: User,
+    @Param('planId', parseUuid('planId')) planId: string,
+    @Param('envelopeId', parseUuid('envelopeId')) envelopeId: string,
+    @Query() query: ListEnvelopesQueryDto,
+  ): Promise<EnvelopeDetailDto> {
+    await this.access.require(planId, user.id, READ_ROLES);
+    return this.envelopes.detail(planId, envelopeId, query.month);
   }
 
   @Patch(':envelopeId')

@@ -5,6 +5,7 @@ import { BudgetModule } from '../budget/budget.module.js';
 import { Plan } from '../plans/entities/plan.entity.js';
 import { PlansModule } from '../plans/plans.module.js';
 import { TransactionLedgerModule } from '../transactions/transaction-ledger.module.js';
+import { TransactionsModule } from '../transactions/transactions.module.js';
 import { EnvelopeGroupsController } from './envelope-groups.controller.js';
 import { EnvelopeGroupsService } from './envelope-groups.service.js';
 import { EnvelopeTemplateController } from './envelope-template.controller.js';
@@ -22,6 +23,7 @@ import { Envelope } from './entities/envelope.entity.js';
     AccountsModule,
     BudgetModule,
     TransactionLedgerModule,
+    TransactionsModule,
   ],
   controllers: [
     EnvelopeGroupsController,
