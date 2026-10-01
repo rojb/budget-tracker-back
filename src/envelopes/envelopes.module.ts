@@ -8,6 +8,7 @@ import { TransactionLedgerModule } from '../transactions/transaction-ledger.modu
 import { TransactionsModule } from '../transactions/transactions.module.js';
 import { EnvelopeGroupsController } from './envelope-groups.controller.js';
 import { EnvelopeGroupsService } from './envelope-groups.service.js';
+import { EnvelopeMovesService } from './envelope-moves.service.js';
 import { EnvelopePhotosController } from './envelope-photos.controller.js';
 import { EnvelopePhotosService } from './envelope-photos.service.js';
 import { EnvelopeTemplateController } from './envelope-template.controller.js';
@@ -36,7 +37,12 @@ import { Envelope } from './entities/envelope.entity.js';
     EnvelopeTemplateController,
     PhotoSuggestionsController,
   ],
-  providers: [EnvelopeGroupsService, EnvelopePhotosService, EnvelopesService],
+  providers: [
+    EnvelopeGroupsService,
+    EnvelopeMovesService,
+    EnvelopePhotosService,
+    EnvelopesService,
+  ],
   exports: [EnvelopeGroupsService, EnvelopesService],
 })
 export class EnvelopesModule {}

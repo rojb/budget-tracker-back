@@ -42,6 +42,7 @@ import { EnvelopeTemplateResultDto } from './dto/envelope-template.dto.js';
 import { EnvelopeGroup } from './entities/envelope-group.entity.js';
 import { Envelope, type GoalType } from './entities/envelope.entity.js';
 import { EnvelopeGroupsService } from './envelope-groups.service.js';
+import { EnvelopeMovesService } from './envelope-moves.service.js';
 import { EnvelopePhotosService } from './envelope-photos.service.js';
 import { DEFAULT_ENVELOPE_ICON } from './envelope-icons.js';
 import { ENVELOPE_TEMPLATE } from './envelope-template.js';
@@ -82,6 +83,7 @@ export class EnvelopesService {
     private readonly transactions: TransactionLedgerService,
     private readonly transactionsService: TransactionsService,
     private readonly photos: EnvelopePhotosService,
+    private readonly moves: EnvelopeMovesService,
   ) {}
 
   // The plan's envelopes in display order (by group position, those without a group last) with
@@ -340,6 +342,14 @@ export class EnvelopesService {
         ],
         manager,
       );
+      // Same transaction and lock as the assignments: the history row exists only if they changed.
+      await this.moves.record(manager, {
+        planId,
+        month,
+        amountMinor: dto.amountMinor,
+        from: { id: dto.fromEnvelopeId, name: rows[fromIndex].name },
+        to: { id: dto.toEnvelopeId, name: rows[toIndex].name },
+      });
     });
     const after = this.calculation.calculateMonth(
       await this.ledger(plan, rows),
