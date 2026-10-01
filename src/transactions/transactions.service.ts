@@ -13,12 +13,20 @@ import {
   type SelectQueryBuilder,
 } from 'typeorm';
 import { Account } from '../accounts/entities/account.entity.js';
+import {
+  compareMonths,
+  currentMonth,
+  monthOfInstant,
+  monthRange,
+} from '../budget/month-key.js';
 import { Envelope } from '../envelopes/entities/envelope.entity.js';
 import { Payee } from '../payees/entities/payee.entity.js';
 import { PayeesService } from '../payees/payees.service.js';
 import type { CreateTransactionDto } from './dto/create-transaction.dto.js';
 import {
+  AffectedMonthsDto,
   type ListTransactionsQueryDto,
+  TransactionChangeDto,
   TransactionDto,
   TransactionPageDto,
   TransactionSplitDto,
@@ -297,16 +305,142 @@ export class TransactionsService {
     }));
   }
 
-  // Loading by id and plan together makes an account of another plan a 404.
+  // Replaces every editable field and the portions of a transaction in one database transaction,
+  // so a reader never sees half an edit. `id` and `createdAt` never change, which is what makes
+  // sending the previous state back an exact undo. An account or a payee the transaction already
+  // has is not validated again (an archived account or a deleted payee must not block an edit).
+  async update(
+    planId: string,
+    transactionId: string,
+    dto: CreateTransactionDto,
+  ): Promise<TransactionChangeDto> {
+    const current = await this.requireLive(planId, transactionId);
+    const portions = this.portionsOf(dto);
+    const account = await this.requireAccount(
+      planId,
+      dto.accountId,
+      current.accountId,
+    );
+    const envelopeNames = await this.requireEnvelopes(planId, portions);
+    const payee = await this.resolvePayee(planId, dto, current.payeeId);
+    const occurredAt = new Date(dto.occurredAt);
+    await this.dataSource.transaction(async (manager) => {
+      // Re-checking the deletion inside the transaction closes the race with a concurrent delete.
+      const updated = await manager.update(
+        Transaction,
+        { id: current.id, deletedAt: IsNull() },
+        {
+          accountId: account.id,
+          payeeId: payee?.id ?? null,
+          direction: dto.direction,
+          amountMinor: dto.amountMinor,
+          occurredAt,
+          description: dto.description ? dto.description : null,
+        },
+      );
+      if (!updated.affected) {
+        throw new NotFoundException('Transaction not found');
+      }
+      await manager.delete(TransactionSplit, { transactionId: current.id });
+      await manager.save(
+        portions.map((portion, position) =>
+          manager.create(TransactionSplit, {
+            transactionId: current.id,
+            envelopeId: portion.envelopeId,
+            amountMinor: portion.amountMinor,
+            position,
+          }),
+        ),
+      );
+    });
+    const edited = Object.assign(new Transaction(), current, {
+      accountId: account.id,
+      payeeId: payee?.id ?? null,
+      direction: dto.direction,
+      amountMinor: dto.amountMinor,
+      occurredAt,
+      description: dto.description ? dto.description : null,
+    });
+    return this.change(
+      TransactionDto.fromEntity(
+        edited,
+        portions.map((portion) =>
+          this.splitDto(
+            portion.envelopeId,
+            portion.envelopeId
+              ? envelopeNames.get(portion.envelopeId)
+              : undefined,
+            portion.amountMinor,
+          ),
+        ),
+        { accountName: account.name, payeeName: payee?.name },
+      ),
+      current.plan.timeZone,
+      current.occurredAt,
+    );
+  }
+
+  // The transaction of the plan that has not been deleted; another plan's, or a deleted one, is 404.
+  private async requireLive(
+    planId: string,
+    transactionId: string,
+  ): Promise<Transaction> {
+    const current = await this.transactions.findOne({
+      where: { id: transactionId, planId, deletedAt: IsNull() },
+      relations: { plan: true },
+    });
+    if (!current) {
+      throw new NotFoundException('Transaction not found');
+    }
+    return current;
+  }
+
+  private change(
+    transaction: TransactionDto,
+    timeZone: string,
+    previousOccurredAt: Date,
+  ): TransactionChangeDto {
+    const result = new TransactionChangeDto();
+    result.transaction = transaction;
+    result.affectedMonths = this.affected(
+      timeZone,
+      previousOccurredAt,
+      new Date(transaction.occurredAt),
+    ).affectedMonths;
+    return result;
+  }
+
+  // Months whose derived figures change: from the earliest month the transaction touched (before or
+  // after the change) to the later of the current month and the latest month it touched. A positive
+  // Available carries into every following month and Ready to Assign is plan wide; the months after
+  // the current one mirror it (budget-calc-engine), so they are not listed.
+  private affected(
+    timeZone: string,
+    before: Date,
+    after: Date = before,
+  ): AffectedMonthsDto {
+    const months = [
+      monthOfInstant(before, timeZone),
+      monthOfInstant(after, timeZone),
+    ].sort(compareMonths);
+    const last = [currentMonth(timeZone), months[1]].sort(compareMonths)[1];
+    const result = new AffectedMonthsDto();
+    result.affectedMonths = monthRange(months[0], last);
+    return result;
+  }
+
+  // Loading by id and plan together makes an account of another plan a 404. An account the
+  // transaction already has (`keepId`, when editing) is accepted even if it was archived since.
   private async requireAccount(
     planId: string,
     accountId: string,
+    keepId?: string,
   ): Promise<Account> {
     const account = await this.accounts.findOneBy({ id: accountId, planId });
     if (!account) {
       throw new NotFoundException('Account not found');
     }
-    if (account.archivedAt !== null) {
+    if (account.archivedAt !== null && account.id !== keepId) {
       throw new ConflictException('Account is archived');
     }
     return account;
@@ -336,15 +470,18 @@ export class TransactionsService {
 
   // `payeeId` must be an active payee of the plan; `payeeName` reuses the active payee with that
   // name (ignoring case) or creates it, so a payee exists after its first use (FR-23).
+  // The payee the transaction already has (`keepId`, when editing) is accepted even if it was
+  // deleted since, so it can keep it.
   private async resolvePayee(
     planId: string,
     dto: CreateTransactionDto,
+    keepId?: string | null,
   ): Promise<Payee | null> {
     if (dto.payeeId) {
       const payee = await this.payees.findOneBy({
         id: dto.payeeId,
         planId,
-        deletedAt: IsNull(),
+        ...(dto.payeeId === keepId ? {} : { deletedAt: IsNull() }),
       });
       if (!payee) {
         throw new NotFoundException('Payee not found');

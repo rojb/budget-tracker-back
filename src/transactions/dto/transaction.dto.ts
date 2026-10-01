@@ -105,6 +105,23 @@ export class TransactionDto {
   }
 }
 
+export class AffectedMonthsDto {
+  @ApiProperty({
+    type: [String],
+    minItems: 1,
+    pattern: '^\\d{4}-(0[1-9]|1[0-2])$',
+    example: ['2026-08', '2026-09'],
+    description:
+      "Months whose derived figures were recalculated by the change, ascending, in the plan's time zone: from the earliest month the transaction touched (before or after the change) to the later of the current month and the latest month it touched.",
+  })
+  affectedMonths!: string[];
+}
+
+export class TransactionChangeDto extends AffectedMonthsDto {
+  @ApiProperty({ type: TransactionDto })
+  transaction!: TransactionDto;
+}
+
 export class TransactionSummaryDto {
   @ApiProperty({
     type: 'integer',

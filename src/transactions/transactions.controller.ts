@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiConflictResponse,
@@ -20,6 +20,7 @@ import type { User } from '../users/entities/user.entity.js';
 import { CreateTransactionDto } from './dto/create-transaction.dto.js';
 import {
   ListTransactionsQueryDto,
+  TransactionChangeDto,
   TransactionDto,
   TransactionPageDto,
 } from './dto/transaction.dto.js';
@@ -42,6 +43,7 @@ const forbidden = ApiForbiddenResponse({
   type: ErrorDto,
 });
 const planIdParam = ApiParam({ name: 'planId', format: 'uuid' });
+const transactionIdParam = ApiParam({ name: 'transactionId', format: 'uuid' });
 
 @ApiTags('Transactions')
 @Controller('plans/:planId/transactions')
@@ -102,5 +104,36 @@ export class TransactionsController {
   ): Promise<TransactionDto> {
     await this.access.require(planId, user.id, WRITE_ROLES);
     return this.transactions.create(planId, user.id, dto);
+  }
+
+  @Put(':transactionId')
+  @ApiOperation({
+    operationId: 'updateTransaction',
+    summary: 'Edit a transaction (owner or editor)',
+    description:
+      'Replaces every editable field and the portions with the body, which has the same shape and rules as recording one. Sending the previous state back undoes an edit exactly: `id` and `createdAt` never change. The account is validated only when it differs from the current one (`409` if archived) and so is `payeeId` (`404` if deleted). The response lists the months whose figures were recalculated.',
+  })
+  @planIdParam
+  @transactionIdParam
+  @ApiOkResponse({
+    description: 'The edited transaction.',
+    type: TransactionChangeDto,
+  })
+  @badRequest
+  @unauthorized
+  @forbidden
+  @notFound
+  @ApiConflictResponse({
+    description: 'The new account is archived.',
+    type: ErrorDto,
+  })
+  async update(
+    @CurrentUser() user: User,
+    @Param('planId', parseUuid('planId')) planId: string,
+    @Param('transactionId', parseUuid('transactionId')) transactionId: string,
+    @Body() dto: CreateTransactionDto,
+  ): Promise<TransactionChangeDto> {
+    await this.access.require(planId, user.id, WRITE_ROLES);
+    return this.transactions.update(planId, transactionId, dto);
   }
 }
