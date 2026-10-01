@@ -10,7 +10,7 @@ import type { MonthKey } from '../budget/month-key.js';
 // Signed amount of a transaction on its account: income +, expense −.
 const SIGNED = `CASE t.direction WHEN 'income' THEN t.amount_minor ELSE -t.amount_minor END`;
 
-// Read side of the transactions: the facts the budget engine, the account balances and the payee
+// Read side of the transactions that were not deleted: the facts the budget engine, the account balances and the payee
 // counts derive their figures from. It owns the sign and the month rules so they live in one place,
 // and it depends on nothing but the database, so the accounts, envelopes and payees modules can use
 // it without a cycle. Months are computed in SQL in the plan's time zone with the same expression
@@ -25,7 +25,7 @@ export class TransactionLedgerService {
     const rows: { accountId: string; net: string }[] =
       await this.dataSource.query(
         `SELECT t.account_id AS "accountId", SUM(${SIGNED})::text AS net
-           FROM transactions t WHERE t.plan_id = $1 GROUP BY t.account_id`,
+           FROM transactions t WHERE t.plan_id = $1 AND t.deleted_at IS NULL GROUP BY t.account_id`,
         [planId],
       );
     return new Map(rows.map((row) => [row.accountId, Number(row.net)]));
@@ -42,7 +42,7 @@ export class TransactionLedgerService {
            COALESCE(SUM(t.amount_minor) FILTER (WHERE t.direction = 'income'), 0)::text AS inflow,
            COALESCE(SUM(t.amount_minor) FILTER (WHERE t.direction = 'expense'), 0)::text AS outflow
          FROM transactions t JOIN plans p ON p.id = t.plan_id
-         WHERE t.account_id = $1
+         WHERE t.account_id = $1 AND t.deleted_at IS NULL
            AND to_char(t.occurred_at AT TIME ZONE p.time_zone, 'YYYY-MM') = $2`,
         [accountId, month],
       );
@@ -66,7 +66,7 @@ export class TransactionLedgerService {
         `SELECT to_char(t.occurred_at AT TIME ZONE $2, 'YYYY-MM') AS month,
                 SUM(${SIGNED})::text AS amount
            FROM transactions t
-          WHERE t.plan_id = $1 AND t.account_id = ANY($3::uuid[])
+          WHERE t.plan_id = $1 AND t.deleted_at IS NULL AND t.account_id = ANY($3::uuid[])
           GROUP BY 1`,
         [planId, timeZone, accountIds],
       );
@@ -85,7 +85,7 @@ export class TransactionLedgerService {
                 to_char(t.occurred_at AT TIME ZONE $2, 'YYYY-MM') AS month,
                 SUM(CASE t.direction WHEN 'expense' THEN s.amount_minor ELSE -s.amount_minor END)::text AS amount
            FROM transaction_splits s JOIN transactions t ON t.id = s.transaction_id
-          WHERE t.plan_id = $1 AND s.envelope_id IS NOT NULL
+          WHERE t.plan_id = $1 AND t.deleted_at IS NULL AND s.envelope_id IS NOT NULL
           GROUP BY 1, 2`,
         [planId, timeZone],
       );
@@ -102,7 +102,7 @@ export class TransactionLedgerService {
       await this.dataSource.query(
         `SELECT t.payee_id AS "payeeId", COUNT(*)::text AS total
            FROM transactions t
-          WHERE t.plan_id = $1 AND t.payee_id IS NOT NULL
+          WHERE t.plan_id = $1 AND t.deleted_at IS NULL AND t.payee_id IS NOT NULL
           GROUP BY t.payee_id`,
         [planId],
       );

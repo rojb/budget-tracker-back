@@ -104,7 +104,8 @@ export class TransactionsService {
       .createQueryBuilder('transaction')
       .innerJoinAndSelect('transaction.account', 'account')
       .leftJoinAndSelect('transaction.payee', 'payee')
-      .where('transaction.planId = :planId', { planId });
+      .where('transaction.planId = :planId', { planId })
+      .andWhere('transaction.deletedAt IS NULL');
     if (query.accountId) {
       builder.andWhere('transaction.accountId = :accountId', {
         accountId: query.accountId,
