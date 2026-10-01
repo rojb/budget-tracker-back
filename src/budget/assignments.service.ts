@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 import type { EnvelopeAmount } from './calculation.types.js';
 import { Assignment } from './entities/assignment.entity.js';
 import { BudgetMonth } from './entities/budget-month.entity.js';
@@ -96,6 +96,62 @@ export class AssignmentsService {
           ['budget_month_id', 'envelope_id'],
         )
         .execute();
+    });
+  }
+
+  // Adds a signed amount to the assignment of each envelope for one month (add-envelope-goals, move
+  // money): `amount_minor + delta` is applied by the database in one statement, so two moves cannot
+  // lose each other's change, and all rows or none change. An envelope with no assignment yet starts
+  // from zero. Deltas are applied in envelope order so concurrent moves cannot deadlock. The caller
+  // checks that the envelopes belong to the plan.
+  async shiftAssignments(
+    planId: string,
+    month: MonthKey,
+    deltas: { envelopeId: string; deltaMinor: number }[],
+    outer?: EntityManager,
+  ): Promise<void> {
+    assertMonthKey(month);
+    for (const row of deltas) {
+      if (!Number.isSafeInteger(row.deltaMinor)) {
+        throw new RangeError(
+          `deltaMinor must be an integer in minor units, got ${row.deltaMinor}`,
+        );
+      }
+    }
+    if (deltas.length === 0) {
+      return;
+    }
+    const ordered = [...deltas].sort((a, b) =>
+      a.envelopeId.localeCompare(b.envelopeId),
+    );
+    // Inside the caller's transaction when it holds one (a move locks its source first).
+    const run = <T>(work: (manager: EntityManager) => Promise<T>) =>
+      outer ? work(outer) : this.dataSource.transaction(work);
+    await run(async (manager) => {
+      await manager
+        .createQueryBuilder()
+        .insert()
+        .into(BudgetMonth)
+        .values({ planId, month })
+        .orIgnore()
+        .execute();
+      const budgetMonth = await manager.findOneByOrFail(BudgetMonth, {
+        planId,
+        month,
+      });
+      const params: unknown[] = [budgetMonth.id];
+      const values = ordered.map((row) => {
+        params.push(row.envelopeId, row.deltaMinor);
+        return `($1, $${params.length - 1}, $${params.length})`;
+      });
+      await manager.query(
+        `INSERT INTO "assignments" ("budget_month_id", "envelope_id", "amount_minor")
+         VALUES ${values.join(', ')}
+         ON CONFLICT ("budget_month_id", "envelope_id") DO UPDATE
+           SET "amount_minor" = "assignments"."amount_minor" + EXCLUDED."amount_minor",
+               "updated_at" = now()`,
+        params,
+      );
     });
   }
 

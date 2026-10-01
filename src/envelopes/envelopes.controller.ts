@@ -29,6 +29,12 @@ import { parseUuid } from '../common/pipes/parse-uuid.pipe.js';
 import { PlanAccessService } from '../plans/plan-access.service.js';
 import { READ_ROLES, WRITE_ROLES } from '../plans/plan-role.js';
 import type { User } from '../users/entities/user.entity.js';
+import { EnvelopeDetailDto } from './dto/envelope-detail.dto.js';
+import { EnvelopeGoalDto } from './dto/envelope-goal.dto.js';
+import {
+  MoveMoneyRequestDto,
+  MoveMoneyResultDto,
+} from './dto/move-money.dto.js';
 import {
   CreateEnvelopeDto,
   EnvelopeDto,
@@ -168,6 +174,38 @@ export class EnvelopesController {
     return this.envelopes.assignInitial(planId, dto);
   }
 
+  @Post('move')
+  @HttpCode(200)
+  @ApiOperation({
+    operationId: 'moveMoney',
+    summary: 'Move money between two envelopes inside a month (owner or editor)',
+    description:
+      "Subtracts the amount from the source's assignment of the month and adds it to the destination's, atomically and without creating a transaction. Ready to Assign, the other envelopes and the other months do not change. The amount cannot exceed the source's Available in that month (`409`).",
+  })
+  @planIdParam
+  @ApiOkResponse({
+    description:
+      'The month, its Ready to Assign and the updated lines of both envelopes.',
+    type: MoveMoneyResultDto,
+  })
+  @badRequest
+  @unauthorized
+  @forbidden
+  @notFound
+  @ApiConflictResponse({
+    description:
+      "The amount is greater than the source envelope's Available in the month; nothing was moved.",
+    type: ErrorDto,
+  })
+  async move(
+    @CurrentUser() user: User,
+    @Param('planId', parseUuid('planId')) planId: string,
+    @Body() dto: MoveMoneyRequestDto,
+  ): Promise<MoveMoneyResultDto> {
+    await this.access.require(planId, user.id, WRITE_ROLES);
+    return this.envelopes.moveMoney(planId, dto);
+  }
+
   @Get(':envelopeId')
   @ApiOperation({ operationId: 'getEnvelope', summary: 'Get an envelope' })
   @planIdParam
@@ -183,6 +221,32 @@ export class EnvelopesController {
   ): Promise<EnvelopeDto> {
     await this.access.require(planId, user.id, READ_ROLES);
     return this.envelopes.get(planId, envelopeId);
+  }
+
+  @Get(':envelopeId/detail')
+  @ApiOperation({
+    operationId: 'getEnvelopeDetail',
+    summary: 'Get an envelope with the figures and the activity of a month',
+    description:
+      "The envelope line of the month (figures, state, goal status), its carryover and the month's transactions that have a portion on the envelope, newest first, at most 100.",
+  })
+  @planIdParam
+  @envelopeIdParam
+  @ApiOkResponse({
+    description: 'The envelope detail.',
+    type: EnvelopeDetailDto,
+  })
+  @badRequest
+  @unauthorized
+  @notFound
+  async detail(
+    @CurrentUser() user: User,
+    @Param('planId', parseUuid('planId')) planId: string,
+    @Param('envelopeId', parseUuid('envelopeId')) envelopeId: string,
+    @Query() query: ListEnvelopesQueryDto,
+  ): Promise<EnvelopeDetailDto> {
+    await this.access.require(planId, user.id, READ_ROLES);
+    return this.envelopes.detail(planId, envelopeId, query.month);
   }
 
   @Patch(':envelopeId')
@@ -206,6 +270,58 @@ export class EnvelopesController {
   ): Promise<EnvelopeDto> {
     await this.access.require(planId, user.id, WRITE_ROLES);
     return this.envelopes.update(planId, envelopeId, dto);
+  }
+
+  @Put(':envelopeId/goal')
+  @ApiOperation({
+    operationId: 'setEnvelopeGoal',
+    summary: 'Set or replace the goal of an envelope (owner or editor)',
+    description:
+      'A `monthly` goal takes no `dueDate`; a `targetByDate` goal requires one, in the current month or later.',
+  })
+  @planIdParam
+  @envelopeIdParam
+  @ApiOkResponse({
+    description: 'The envelope with its goal.',
+    type: EnvelopeDto,
+  })
+  @badRequest
+  @unauthorized
+  @forbidden
+  @notFound
+  async setGoal(
+    @CurrentUser() user: User,
+    @Param('planId', parseUuid('planId')) planId: string,
+    @Param('envelopeId', parseUuid('envelopeId')) envelopeId: string,
+    @Body() dto: EnvelopeGoalDto,
+  ): Promise<EnvelopeDto> {
+    await this.access.require(planId, user.id, WRITE_ROLES);
+    return this.envelopes.setGoal(planId, envelopeId, dto);
+  }
+
+  @Delete(':envelopeId/goal')
+  @ApiOperation({
+    operationId: 'clearEnvelopeGoal',
+    summary: 'Remove the goal of an envelope (owner or editor)',
+    description: 'Responds `200` also when the envelope had no goal.',
+  })
+  @planIdParam
+  @envelopeIdParam
+  @ApiOkResponse({
+    description: 'The envelope without a goal.',
+    type: EnvelopeDto,
+  })
+  @badRequest
+  @unauthorized
+  @forbidden
+  @notFound
+  async clearGoal(
+    @CurrentUser() user: User,
+    @Param('planId', parseUuid('planId')) planId: string,
+    @Param('envelopeId', parseUuid('envelopeId')) envelopeId: string,
+  ): Promise<EnvelopeDto> {
+    await this.access.require(planId, user.id, WRITE_ROLES);
+    return this.envelopes.clearGoal(planId, envelopeId);
   }
 
   @Delete(':envelopeId')

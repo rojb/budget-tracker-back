@@ -28,5 +28,8 @@ Thumbs.db
 .swc/
 coverage/
 
+# uploaded goal photos (PHOTOS_DIR)
+/storage
+
 # generated OpenAPI spec (npm run openapi:export)
 openapi.generated.json

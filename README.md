@@ -270,6 +270,48 @@ Cambio `add-transactions` (RRG-49). Módulo `src/transactions/` (FR-06, FR-07, F
   combinan con AND; `from` posterior a `to` → 400. `summary` suma, con el monto completo, todas las
   transacciones que cumplen el filtro (no solo la página).
 
+## Metas, estados y fotos de sobres
+
+Cambio `add-envelope-goals` (RRG-52). Mismo módulo `src/envelopes/` (FR-19, FR-20, FR-24, FR-25, FR-41).
+
+| Endpoint | Rol | Qué hace |
+|---|---|---|
+| `PUT /plans/:planId/envelopes/:envelopeId/goal` | `owner`, `editor` | Fija o reemplaza la meta: `{ type: monthly \| targetByDate, targetMinor, dueDate? }` |
+| `DELETE /plans/:planId/envelopes/:envelopeId/goal` | `owner`, `editor` | Quita la meta (200 también si no tenía) |
+| `GET /plans/:planId/envelopes/:envelopeId/detail?month` | miembro | Línea del mes (cifras, `state`, `goalStatus`), `carryoverMinor` y la actividad del mes (hasta 100 movimientos con una porción en el sobre) |
+| `POST /plans/:planId/envelopes/move` | `owner`, `editor` | Mueve `amountMinor` de un sobre a otro dentro de un mes, sin transacción |
+| `POST /plans/:planId/envelopes/:envelopeId/photo` | `owner`, `editor` | Sube la foto (`multipart/form-data`, campo `file`) |
+| `GET /plans/:planId/envelopes/:envelopeId/photo` | miembro | Devuelve la foto (`image/jpeg`); 404 si no hay o no sos miembro |
+| `DELETE /plans/:planId/envelopes/:envelopeId/photo` | `owner`, `editor` | Quita la foto y borra el archivo |
+| `POST /plans/:planId/envelopes/:envelopeId/photo/suggested` | `owner`, `editor` | Usa una foto sugerida (`vacaciones`, `auto`, `emergencia`, `mudanza`) |
+| `GET /envelope-photo-suggestions` · `/:suggestionId/image` | cualquier sesión | Las cuatro fotos sugeridas y su imagen |
+
+`POST /plans/:planId/envelopes` acepta además `goal`, y las líneas de `GET /plans/:planId/envelopes`
+traen `state` y, con meta, `goalStatus`.
+
+- **Meta.** Columnas `goal_*` de `envelopes` (0..1 por sobre, siempre se leen con él): solo la
+  intención del usuario. Una meta `monthly` no lleva `dueDate`; una `targetByDate` la exige, en el mes
+  actual o después (400 si no). Lo derivado nunca se guarda.
+- **Una sola definición (`src/envelopes/goal-status.ts`, módulo puro).** Monto requerido del mes:
+  `monthly` = la meta; `targetByDate` = `ceil(max(0, meta − arrastre) / N)`, con `N` = meses del mes
+  visto al del vencimiento, ambos incluidos, mínimo 1. `state`: `overspent` si Available < 0; si no
+  `underfunded` cuando hay meta y lo asignado en el mes es menor que el requerido; si no `funded`.
+  El listado, el detalle y el resultado de mover dinero lo usan; el cliente no recalcula nada.
+- **Mover dinero.** `AssignmentsService.shiftAssignments` suma `−monto` y `+monto` a las asignaciones
+  del mes en una sola sentencia y transacción (`ON CONFLICT DO UPDATE ... + EXCLUDED`), así Listo
+  para asignar no cambia. El monto no puede superar el Available del origen en ese mes (arrastre
+  incluido): si lo supera, o el origen no tiene dinero, 409; mismo sobre o monto no entero/≤ 0, 400.
+- **Fotos.** Hasta 5 MB (413). El tipo lo decide el contenido (firma JPEG/PNG/WebP), no el nombre ni
+  el `Content-Type`; cualquier otra cosa, o un archivo que no se puede decodificar, 415. `sharp` aplica
+  la orientación, quita metadatos y guarda un JPEG de a lo sumo 1.080 px de ancho (no agranda). Los
+  archivos viven en `PHOTOS_DIR` (por defecto `storage/photos`, validado con Joi, ignorado por git)
+  como `<plan>/<sobre>-<hex>.jpg`; reemplazar o quitar la foto, o borrar el sobre, borra el archivo.
+  La foto se sirve solo por `GET .../photo` con bearer y membresía (no hay carpeta estática): el
+  cliente la pide con el header `Authorization`. `photoUrl` es una ruta relativa con `?v=` que cambia
+  con cada foto.
+- **Fotos sugeridas.** Las cuatro de `design/photos` están en `assets/suggested-photos/` y pasan por el
+  mismo redimensionado al elegirlas.
+
 ## Scripts principales
 
 | Script | Qué hace |

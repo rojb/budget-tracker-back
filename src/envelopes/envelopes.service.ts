@@ -3,17 +3,30 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, In, IsNull, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, IsNull, Repository } from 'typeorm';
 import { AccountsService } from '../accounts/accounts.service.js';
 import { AssignmentsService } from '../budget/assignments.service.js';
 import { CalculationService } from '../budget/calculation.service.js';
 import type { PlanLedger } from '../budget/calculation.types.js';
-import { currentMonth, type MonthKey } from '../budget/month-key.js';
+import {
+  compareMonths,
+  currentMonth,
+  type MonthKey,
+} from '../budget/month-key.js';
 import { isUniqueViolation } from '../common/database/unique-violation.js';
 import { Plan } from '../plans/entities/plan.entity.js';
+import { ListTransactionsQueryDto } from '../transactions/dto/transaction.dto.js';
 import { TransactionLedgerService } from '../transactions/transaction-ledger.service.js';
+import { TransactionsService } from '../transactions/transactions.service.js';
+import { EnvelopeDetailDto } from './dto/envelope-detail.dto.js';
+import { EnvelopeGoalDto } from './dto/envelope-goal.dto.js';
+import {
+  MoveMoneyResultDto,
+  type MoveMoneyRequestDto,
+} from './dto/move-money.dto.js';
 import {
   EnvelopeDto,
   EnvelopeLineDto,
@@ -27,10 +40,30 @@ import {
 } from './dto/initial-assignment.dto.js';
 import { EnvelopeTemplateResultDto } from './dto/envelope-template.dto.js';
 import { EnvelopeGroup } from './entities/envelope-group.entity.js';
-import { Envelope } from './entities/envelope.entity.js';
+import { Envelope, type GoalType } from './entities/envelope.entity.js';
 import { EnvelopeGroupsService } from './envelope-groups.service.js';
+import { EnvelopePhotosService } from './envelope-photos.service.js';
 import { DEFAULT_ENVELOPE_ICON } from './envelope-icons.js';
 import { ENVELOPE_TEMPLATE } from './envelope-template.js';
+
+interface GoalColumns {
+  goalType: GoalType | null;
+  goalTargetMinor: number | null;
+  goalDueDate: string | null;
+}
+
+// Last calendar day of a YYYY-MM month.
+function daysInMonth(month: MonthKey): number {
+  return new Date(
+    Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0),
+  ).getUTCDate();
+}
+
+const NO_GOAL: GoalColumns = {
+  goalType: null,
+  goalTargetMinor: null,
+  goalDueDate: null,
+};
 
 // Callers check membership and role with PlanAccessService before using these methods.
 @Injectable()
@@ -47,6 +80,8 @@ export class EnvelopesService {
     private readonly accounts: AccountsService,
     private readonly groupsService: EnvelopeGroupsService,
     private readonly transactions: TransactionLedgerService,
+    private readonly transactionsService: TransactionsService,
+    private readonly photos: EnvelopePhotosService,
   ) {}
 
   // The plan's envelopes in display order (by group position, those without a group last) with
@@ -60,14 +95,42 @@ export class EnvelopesService {
     const result = new EnvelopeListDto();
     result.month = key;
     result.readyToAssignMinor = state.readyToAssignMinor;
-    result.items = rows.map((row, index) => {
-      const line = new EnvelopeLineDto();
-      line.envelope = EnvelopeDto.fromEntity(row);
-      line.assignedMinor = state.envelopes[index].assignedMinor;
-      line.spentMinor = state.envelopes[index].spentMinor;
-      line.availableMinor = state.envelopes[index].availableMinor;
-      return line;
-    });
+    result.items = rows.map((row, index) =>
+      EnvelopeLineDto.build(row, state.envelopes[index], key),
+    );
+    return result;
+  }
+
+  // One envelope of a month (FR-24): its line (figures, state, goal status), its carryover and the
+  // month's activity, asked from the transactions list so the plan's time zone and the logical
+  // deletion are applied by the code that owns them.
+  async detail(
+    planId: string,
+    envelopeId: string,
+    month?: string,
+  ): Promise<EnvelopeDetailDto> {
+    const envelope = await this.find(planId, envelopeId);
+    const plan = await this.plans.findOneByOrFail({ id: planId });
+    const key: MonthKey = month ?? currentMonth(plan.timeZone);
+    const rows = await this.ordered(planId);
+    const state = this.calculation.calculateMonth(
+      await this.ledger(plan, rows),
+      key,
+    );
+    const index = rows.findIndex((row) => row.id === envelope.id);
+    const query = new ListTransactionsQueryDto();
+    query.envelopeId = envelope.id;
+    query.from = `${key}-01`;
+    query.to = `${key}-${String(daysInMonth(key)).padStart(2, '0')}`;
+    query.page = 1;
+    query.pageSize = 100;
+    const activity = await this.transactionsService.list(planId, query);
+    const result = new EnvelopeDetailDto();
+    result.month = key;
+    result.line = EnvelopeLineDto.build(envelope, state.envelopes[index], key);
+    result.carryoverMinor = state.envelopes[index].carryoverMinor;
+    result.activity = activity.items;
+    result.activityTotal = activity.total;
     return result;
   }
 
@@ -91,6 +154,7 @@ export class EnvelopesService {
     if (dto.groupId) {
       await this.requireGroup(planId, dto.groupId);
     }
+    const goal = dto.goal ? await this.goalColumns(planId, dto.goal) : NO_GOAL;
     const envelope = await this.saveUnique(
       this.envelopes.create({
         planId,
@@ -98,9 +162,31 @@ export class EnvelopesService {
         name: dto.name,
         icon: dto.icon ?? DEFAULT_ENVELOPE_ICON,
         position: await this.nextPosition(planId, dto.groupId ?? null),
+        ...goal,
+        photoFile: null,
+        photoUpdatedAt: null,
       }),
     );
     return EnvelopeDto.fromEntity(envelope);
+  }
+
+  // Sets or replaces the goal (capability envelope-goals). Only the intent is stored; the required
+  // amount and the state are derived by goal-status.ts on every read.
+  async setGoal(
+    planId: string,
+    envelopeId: string,
+    dto: EnvelopeGoalDto,
+  ): Promise<EnvelopeDto> {
+    const envelope = await this.find(planId, envelopeId);
+    Object.assign(envelope, await this.goalColumns(planId, dto));
+    return EnvelopeDto.fromEntity(await this.envelopes.save(envelope));
+  }
+
+  // Removing a goal the envelope does not have is not an error.
+  async clearGoal(planId: string, envelopeId: string): Promise<EnvelopeDto> {
+    const envelope = await this.find(planId, envelopeId);
+    Object.assign(envelope, NO_GOAL);
+    return EnvelopeDto.fromEntity(await this.envelopes.save(envelope));
   }
 
   async get(planId: string, envelopeId: string): Promise<EnvelopeDto> {
@@ -132,9 +218,13 @@ export class EnvelopesService {
   // The envelope's assignments go with it (FK ON DELETE CASCADE), so its money returns to Ready
   // to Assign; payees that suggested it lose the suggestion (ON DELETE SET NULL). Transactions keep
   // existing: their portions that used it lose the envelope (ON DELETE SET NULL, "Sin sobre").
+  // Its goal goes with the row and its photo file is deleted after it.
   async remove(planId: string, envelopeId: string): Promise<void> {
-    await this.find(planId, envelopeId);
+    const envelope = await this.find(planId, envelopeId);
     await this.envelopes.delete({ id: envelopeId, planId });
+    if (envelope.photoFile) {
+      await this.photos.discard(envelope.photoFile);
+    }
   }
 
   // `envelopeIds` must be a permutation of the envelopes of one group (or of the ungrouped ones
@@ -206,6 +296,71 @@ export class EnvelopesService {
     return result;
   }
 
+  // Move money (FR-25, screen 24): takes the amount from the source's assignment of the month and
+  // gives it to the destination's, as one atomic change of the budget engine's assignment facts, so
+  // Ready to Assign and every other envelope and month stay as they were. The amount cannot be
+  // more than the source has available in the month (carryover included): 24 shows no overspent
+  // source, and overspending is a state that spending causes, not a move. (An expense recorded at
+  // the same instant does not take that lock and can still leave the source overspent.)
+  async moveMoney(
+    planId: string,
+    dto: MoveMoneyRequestDto,
+  ): Promise<MoveMoneyResultDto> {
+    if (dto.fromEnvelopeId === dto.toEnvelopeId) {
+      throw new BadRequestException([
+        'fromEnvelopeId and toEnvelopeId must be different envelopes',
+      ]);
+    }
+    const plan = await this.plans.findOneByOrFail({ id: planId });
+    const month: MonthKey = dto.month ?? currentMonth(plan.timeZone);
+    const rows = await this.ordered(planId);
+    const fromIndex = rows.findIndex((row) => row.id === dto.fromEnvelopeId);
+    const toIndex = rows.findIndex((row) => row.id === dto.toEnvelopeId);
+    if (fromIndex < 0 || toIndex < 0) {
+      throw new NotFoundException('Envelope not found');
+    }
+    // The check and the change run under the row lock of the source envelope, in one transaction,
+    // so two moves out of the same envelope cannot both spend the same available money.
+    await this.lockingSource(dto.fromEnvelopeId, async (manager) => {
+      const before = this.calculation.calculateMonth(
+        await this.ledger(plan, rows),
+        month,
+      );
+      if (dto.amountMinor > before.envelopes[fromIndex].availableMinor) {
+        throw new ConflictException(
+          'The source envelope has less available than the amount',
+        );
+      }
+      await this.assignments.shiftAssignments(
+        planId,
+        month,
+        [
+          { envelopeId: dto.fromEnvelopeId, deltaMinor: -dto.amountMinor },
+          { envelopeId: dto.toEnvelopeId, deltaMinor: dto.amountMinor },
+        ],
+        manager,
+      );
+    });
+    const after = this.calculation.calculateMonth(
+      await this.ledger(plan, rows),
+      month,
+    );
+    const result = new MoveMoneyResultDto();
+    result.month = month;
+    result.readyToAssignMinor = after.readyToAssignMinor;
+    result.from = EnvelopeLineDto.build(
+      rows[fromIndex],
+      after.envelopes[fromIndex],
+      month,
+    );
+    result.to = EnvelopeLineDto.build(
+      rows[toIndex],
+      after.envelopes[toIndex],
+      month,
+    );
+    return result;
+  }
+
   // Creates the selected template envelopes (all of them when `names` is absent) without any
   // assigned amount, in template order, in one transaction. Only for a plan with no envelopes.
   // A group of the plan with the same name (ignoring case) is reused, and a group none of whose
@@ -271,6 +426,45 @@ export class EnvelopesService {
     return result;
   }
 
+  // Runs `work` in a database transaction that holds the row lock of the source envelope
+  // (SELECT ... FOR UPDATE NOWAIT), so two moves out of the same envelope never overlap: the second
+  // starts only after the first committed and sees its result. A move that finds the row locked
+  // gives its connection back and retries after a short pause instead of waiting on it, so
+  // waiting moves never hold pool connections that the running one needs for its reads.
+  private async lockingSource<T>(
+    envelopeId: string,
+    work: (manager: EntityManager) => Promise<T>,
+  ): Promise<T> {
+    for (let attempt = 0; attempt < 400; attempt++) {
+      const runner = this.dataSource.createQueryRunner();
+      await runner.connect();
+      await runner.startTransaction();
+      try {
+        await runner.query(
+          'SELECT "id" FROM "envelopes" WHERE "id" = $1 FOR UPDATE NOWAIT',
+          [envelopeId],
+        );
+        const result = await work(runner.manager);
+        await runner.commitTransaction();
+        return result;
+      } catch (error) {
+        await runner.rollbackTransaction().catch(() => undefined);
+        // 55P03: the row is locked by another move; anything else is a real error.
+        if ((error as { code?: string }).code !== '55P03') {
+          throw error;
+        }
+      } finally {
+        await runner.release();
+      }
+      await new Promise((resolve) =>
+        setTimeout(resolve, 5 + Math.random() * 15),
+      );
+    }
+    throw new ServiceUnavailableException(
+      'Too many moves in progress, try again',
+    );
+  }
+
   // Loading by id and plan together makes an envelope of another plan a 404.
   async find(planId: string, envelopeId: string): Promise<Envelope> {
     const envelope = await this.envelopes.findOneBy({ id: envelopeId, planId });
@@ -289,6 +483,42 @@ export class EnvelopesService {
       .addOrderBy('envelope.position', 'ASC')
       .addOrderBy('envelope.createdAt', 'ASC')
       .getMany();
+  }
+
+  // The columns of a goal, after the rules that need more than one field or the plan: a monthly
+  // goal has no due date, a goal with a date needs one, and not in a month already over.
+  private async goalColumns(
+    planId: string,
+    goal: EnvelopeGoalDto,
+  ): Promise<GoalColumns> {
+    if (goal.type === 'monthly') {
+      if (goal.dueDate !== undefined) {
+        throw new BadRequestException([
+          'dueDate must not be sent for a monthly goal',
+        ]);
+      }
+      return {
+        goalType: 'monthly',
+        goalTargetMinor: goal.targetMinor,
+        goalDueDate: null,
+      };
+    }
+    if (goal.dueDate === undefined) {
+      throw new BadRequestException([
+        'dueDate is required for a targetByDate goal',
+      ]);
+    }
+    const plan = await this.plans.findOneByOrFail({ id: planId });
+    if (
+      compareMonths(goal.dueDate.slice(0, 7), currentMonth(plan.timeZone)) < 0
+    ) {
+      throw new BadRequestException(['dueDate must not be in a past month']);
+    }
+    return {
+      goalType: 'targetByDate',
+      goalTargetMinor: goal.targetMinor,
+      goalDueDate: goal.dueDate,
+    };
   }
 
   private async requireGroup(planId: string, groupId: string): Promise<void> {

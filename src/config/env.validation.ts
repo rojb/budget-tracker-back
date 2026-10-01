@@ -12,4 +12,7 @@ export const envValidationSchema = Joi.object({
   DATABASE_NAME: Joi.string().required(),
   JWT_SECRET: Joi.string().min(32).required(),
   JWT_EXPIRES_IN: Joi.string().default('7d'),
+  // Root directory of the goal photos (FR-41). Relative paths resolve against the working directory;
+  // it is created on demand and git-ignored (`/storage`).
+  PHOTOS_DIR: Joi.string().min(1).default('storage/photos'),
 });

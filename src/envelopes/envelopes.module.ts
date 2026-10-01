@@ -5,9 +5,13 @@ import { BudgetModule } from '../budget/budget.module.js';
 import { Plan } from '../plans/entities/plan.entity.js';
 import { PlansModule } from '../plans/plans.module.js';
 import { TransactionLedgerModule } from '../transactions/transaction-ledger.module.js';
+import { TransactionsModule } from '../transactions/transactions.module.js';
 import { EnvelopeGroupsController } from './envelope-groups.controller.js';
 import { EnvelopeGroupsService } from './envelope-groups.service.js';
+import { EnvelopePhotosController } from './envelope-photos.controller.js';
+import { EnvelopePhotosService } from './envelope-photos.service.js';
 import { EnvelopeTemplateController } from './envelope-template.controller.js';
+import { PhotoSuggestionsController } from './photo-suggestions.controller.js';
 import { EnvelopesController } from './envelopes.controller.js';
 import { EnvelopesService } from './envelopes.service.js';
 import { EnvelopeGroup } from './entities/envelope-group.entity.js';
@@ -22,13 +26,16 @@ import { Envelope } from './entities/envelope.entity.js';
     AccountsModule,
     BudgetModule,
     TransactionLedgerModule,
+    TransactionsModule,
   ],
   controllers: [
     EnvelopeGroupsController,
     EnvelopesController,
+    EnvelopePhotosController,
     EnvelopeTemplateController,
+    PhotoSuggestionsController,
   ],
-  providers: [EnvelopeGroupsService, EnvelopesService],
+  providers: [EnvelopeGroupsService, EnvelopePhotosService, EnvelopesService],
   exports: [EnvelopeGroupsService, EnvelopesService],
 })
 export class EnvelopesModule {}
