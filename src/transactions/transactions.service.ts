@@ -5,7 +5,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, In, IsNull, Repository } from 'typeorm';
+import {
+  DataSource,
+  In,
+  IsNull,
+  Repository,
+  type SelectQueryBuilder,
+} from 'typeorm';
 import { Account } from '../accounts/entities/account.entity.js';
 import { Envelope } from '../envelopes/entities/envelope.entity.js';
 import { Payee } from '../payees/entities/payee.entity.js';
@@ -16,6 +22,7 @@ import {
   TransactionDto,
   TransactionPageDto,
   TransactionSplitDto,
+  TransactionSummaryDto,
 } from './dto/transaction.dto.js';
 import { TransactionSplit } from './entities/transaction-split.entity.js';
 import { Transaction } from './entities/transaction.entity.js';
@@ -100,17 +107,16 @@ export class TransactionsService {
   ): Promise<TransactionPageDto> {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 20;
-    const builder = this.transactions
-      .createQueryBuilder('transaction')
-      .innerJoinAndSelect('transaction.account', 'account')
-      .leftJoinAndSelect('transaction.payee', 'payee')
-      .where('transaction.planId = :planId', { planId })
-      .andWhere('transaction.deletedAt IS NULL');
-    if (query.accountId) {
-      builder.andWhere('transaction.accountId = :accountId', {
-        accountId: query.accountId,
-      });
-    }
+    this.requireOrderedDates(query);
+    const builder = this.filtered(
+      this.transactions
+        .createQueryBuilder('transaction')
+        .innerJoinAndSelect('transaction.account', 'account')
+        .leftJoinAndSelect('transaction.payee', 'payee'),
+      planId,
+      query,
+    );
+    const summary = await this.summary(planId, query);
     const [rows, total] = await builder
       .orderBy('transaction.occurredAt', 'DESC')
       .addOrderBy('transaction.createdAt', 'DESC')
@@ -129,6 +135,7 @@ export class TransactionsService {
     result.page = page;
     result.pageSize = pageSize;
     result.total = total;
+    result.summary = summary;
     result.items = rows.map((row) =>
       TransactionDto.fromEntity(
         row,
@@ -145,6 +152,109 @@ export class TransactionsService {
       ),
     );
     return result;
+  }
+
+  private requireOrderedDates(query: ListTransactionsQueryDto): void {
+    if (query.from && query.to && query.from > query.to) {
+      throw new BadRequestException(['from must not be after to']);
+    }
+  }
+
+  // The predicates of the list and of its summary, so both always select the same transactions.
+  // Dates and times are local to the plan's time zone. `builder` has the `payee` join.
+  private filtered(
+    builder: SelectQueryBuilder<Transaction>,
+    planId: string,
+    query: ListTransactionsQueryDto,
+  ): SelectQueryBuilder<Transaction> {
+    const local = 'transaction.occurredAt AT TIME ZONE plan.timeZone';
+    builder
+      .innerJoin('transaction.plan', 'plan')
+      .where('transaction.planId = :planId', { planId })
+      .andWhere('transaction.deletedAt IS NULL');
+    if (query.accountId) {
+      builder.andWhere('transaction.accountId = :accountId', {
+        accountId: query.accountId,
+      });
+    }
+    if (query.payeeId) {
+      builder.andWhere('transaction.payeeId = :payeeId', {
+        payeeId: query.payeeId,
+      });
+    }
+    if (query.direction) {
+      builder.andWhere('transaction.direction = :direction', {
+        direction: query.direction,
+      });
+    }
+    if (query.envelopeId) {
+      builder.andWhere(
+        `EXISTS (SELECT 1 FROM transaction_splits fs
+                  WHERE fs.transaction_id = transaction.id AND fs.envelope_id = :envelopeId)`,
+        { envelopeId: query.envelopeId },
+      );
+    }
+    if (query.from) {
+      builder.andWhere(`(${local})::date >= :from::date`, { from: query.from });
+    }
+    if (query.to) {
+      builder.andWhere(`(${local})::date <= :to::date`, { to: query.to });
+    }
+    const time = `to_char(${local}, 'HH24:MI')`;
+    if (query.timeFrom && query.timeTo && query.timeFrom > query.timeTo) {
+      // Across midnight (22:00 to 02:00): the evening or the early morning.
+      builder.andWhere(`(${time} >= :timeFrom OR ${time} <= :timeTo)`, {
+        timeFrom: query.timeFrom,
+        timeTo: query.timeTo,
+      });
+    } else {
+      if (query.timeFrom) {
+        builder.andWhere(`${time} >= :timeFrom`, { timeFrom: query.timeFrom });
+      }
+      if (query.timeTo) {
+        builder.andWhere(`${time} <= :timeTo`, { timeTo: query.timeTo });
+      }
+    }
+    if (query.q) {
+      // Escape LIKE wildcards so "50%" and "a_b" are searched literally.
+      const pattern = `%${query.q.replace(/[\\%_]/g, '\\$&')}%`;
+      builder.andWhere(
+        `(payee.name ILIKE :q ESCAPE '\\'
+          OR transaction.description ILIKE :q ESCAPE '\\'
+          OR EXISTS (SELECT 1 FROM transaction_splits qs
+                       JOIN envelopes qe ON qe.id = qs.envelope_id
+                      WHERE qs.transaction_id = transaction.id AND qe.name ILIKE :q ESCAPE '\\'))`,
+        { q: pattern },
+      );
+    }
+    return builder;
+  }
+
+  // Money that left and came in over every transaction the filters select, whatever the page.
+  private async summary(
+    planId: string,
+    query: ListTransactionsQueryDto,
+  ): Promise<TransactionSummaryDto> {
+    const row = await this.filtered(
+      this.transactions
+        .createQueryBuilder('transaction')
+        .leftJoin('transaction.payee', 'payee'),
+      planId,
+      query,
+    )
+      .select(
+        `COALESCE(SUM(transaction.amountMinor) FILTER (WHERE transaction.direction = 'expense'), 0)::text`,
+        'outflow',
+      )
+      .addSelect(
+        `COALESCE(SUM(transaction.amountMinor) FILTER (WHERE transaction.direction = 'income'), 0)::text`,
+        'inflow',
+      )
+      .getRawOne<{ outflow: string; inflow: string }>();
+    const summary = new TransactionSummaryDto();
+    summary.outflowMinor = Number(row?.outflow ?? 0);
+    summary.inflowMinor = Number(row?.inflow ?? 0);
+    return summary;
   }
 
   // Structural rules of the request; nothing is read from the database yet.
