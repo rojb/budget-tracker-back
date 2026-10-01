@@ -70,6 +70,10 @@ export class Transaction {
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 
+  // Logical deletion: a deleted transaction is not a fact of the budget until it is restored.
+  @Column({ name: 'deleted_at', type: 'timestamptz', nullable: true })
+  deletedAt!: Date | null;
+
   @OneToMany(() => TransactionSplit, (split) => split.transaction)
   splits!: Relation<TransactionSplit[]>;
 }
