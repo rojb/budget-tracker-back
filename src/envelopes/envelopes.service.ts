@@ -41,6 +41,7 @@ import { EnvelopeTemplateResultDto } from './dto/envelope-template.dto.js';
 import { EnvelopeGroup } from './entities/envelope-group.entity.js';
 import { Envelope, type GoalType } from './entities/envelope.entity.js';
 import { EnvelopeGroupsService } from './envelope-groups.service.js';
+import { EnvelopePhotosService } from './envelope-photos.service.js';
 import { DEFAULT_ENVELOPE_ICON } from './envelope-icons.js';
 import { ENVELOPE_TEMPLATE } from './envelope-template.js';
 
@@ -79,6 +80,7 @@ export class EnvelopesService {
     private readonly groupsService: EnvelopeGroupsService,
     private readonly transactions: TransactionLedgerService,
     private readonly transactionsService: TransactionsService,
+    private readonly photos: EnvelopePhotosService,
   ) {}
 
   // The plan's envelopes in display order (by group position, those without a group last) with
@@ -217,9 +219,13 @@ export class EnvelopesService {
   // The envelope's assignments go with it (FK ON DELETE CASCADE), so its money returns to Ready
   // to Assign; payees that suggested it lose the suggestion (ON DELETE SET NULL). Transactions keep
   // existing: their portions that used it lose the envelope (ON DELETE SET NULL, "Sin sobre").
+  // Its goal goes with the row and its photo file is deleted after it.
   async remove(planId: string, envelopeId: string): Promise<void> {
-    await this.find(planId, envelopeId);
+    const envelope = await this.find(planId, envelopeId);
     await this.envelopes.delete({ id: envelopeId, planId });
+    if (envelope.photoFile) {
+      await this.photos.discard(envelope.photoFile);
+    }
   }
 
   // `envelopeIds` must be a permutation of the envelopes of one group (or of the ungrouped ones
