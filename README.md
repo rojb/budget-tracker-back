@@ -226,7 +226,10 @@ Cambio `add-transactions` (RRG-49). Módulo `src/transactions/` (FR-06, FR-07, F
 | Endpoint | Rol | Qué hace |
 |---|---|---|
 | `POST /plans/:planId/transactions` | `owner`, `editor` | Registra un gasto o ingreso: `direction`, `accountId`, `amountMinor` (> 0), `occurredAt` (con offset) y opcionales `payeeId` o `payeeName`, `description`, `envelopeId` o `splits` |
-| `GET /plans/:planId/transactions?accountId&page&pageSize` | miembro | Movimientos, más nuevos primero (`occurredAt`, luego alta), paginados; con `accountId`, los de esa cuenta |
+| `GET /plans/:planId/transactions?accountId&payeeId&envelopeId&direction&from&to&timeFrom&timeTo&q&page&pageSize` | miembro | Movimientos no eliminados, más nuevos primero (`occurredAt`, luego alta), paginados y filtrados; la respuesta trae `summary` (`outflowMinor`, `inflowMinor`) |
+| `PUT /plans/:planId/transactions/:transactionId` | `owner`, `editor` | Edita: reemplaza todos los campos editables y las porciones con el mismo cuerpo que el alta; responde `{ transaction, affectedMonths }` |
+| `DELETE /plans/:planId/transactions/:transactionId` | `owner`, `editor` | Baja lógica (`deleted_at`); responde `{ affectedMonths }` |
+| `POST /plans/:planId/transactions/:transactionId/restore` | `owner`, `editor` | Deshace la baja: devuelve la misma transacción (mismo `id`, alta, porciones); responde `{ transaction, affectedMonths }` |
 
 - **Destino.** Un gasto lleva `envelopeId` o `splits` (2 a 20 porciones que suman exactamente
   `amountMinor`, si no 400); un ingreso lleva `envelopeId` o nada, y sin sobre va a Listo para
@@ -244,6 +247,28 @@ Cambio `add-transactions` (RRG-49). Módulo `src/transactions/` (FR-06, FR-07, F
   (`spending`, por lo que el motor de cálculo no cambia) y `PayeesService.transactionCounts`.
 - **Alta del beneficiario.** `payeeName` llama a `PayeesService.findOrCreate`: reutiliza el activo
   con ese nombre (sin distinguir mayúsculas) o lo crea.
+- **Edición (`add-transaction-editing-and-filters`).** `PUT` en vez de `PATCH`: el cuerpo es el de
+  `POST` y reemplaza el estado completo (se puede quitar beneficiario, descripción o sobre sin
+  `null`), por lo que deshacer una edición es reenviar el estado anterior; `id` y `created_at` no
+  cambian. Se hace en una sola transacción de base de datos (fila + porciones). La cuenta (409 si
+  está archivada) y el beneficiario (404 si fue borrado) solo se validan si cambian, así una cuenta
+  archivada o un beneficiario borrado no impiden editar el resto. Misma validación estructural del
+  alta (suma exacta de porciones → 400).
+- **Baja y deshacer.** `DELETE` solo marca `transactions.deleted_at`; todos los lectores de hechos
+  (`TransactionLedgerService` y el listado) ignoran las filas con `deleted_at`, por lo que saldos,
+  Available y Listo para asignar quedan como si nunca hubiera existido, y `restore` vuelve a dejarla
+  idéntica. Eliminar dos veces o restaurar una viva → 404. Revertir la migración hace reaparecer las
+  eliminadas.
+- **Recálculo.** No hay agregados guardados ni caché (el motor calcula por consulta), así que editar,
+  eliminar o restaurar no invalida nada: la próxima lectura de cualquier mes ya es el recálculo.
+  `affectedMonths` lista, en la zona del plan, desde el mes más antiguo que tocó la transacción
+  (antes o después del cambio) hasta el mayor entre el mes actual y el más reciente que tocó.
+- **Filtros.** `from`/`to` (fecha local `YYYY-MM-DD`, inclusivos), `timeFrom`/`timeTo` (`HH:mm`
+  local, inclusivos al minuto, en cualquier fecha; si `timeFrom > timeTo` el rango cruza la
+  medianoche), `payeeId`, `accountId`, `direction`, `envelopeId` (alguna porción en ese sobre) y `q`
+  (sin distinguir mayúsculas: beneficiario, descripción o nombre del sobre de alguna porción). Se
+  combinan con AND; `from` posterior a `to` → 400. `summary` suma, con el monto completo, todas las
+  transacciones que cumplen el filtro (no solo la página).
 
 ## Scripts principales
 
