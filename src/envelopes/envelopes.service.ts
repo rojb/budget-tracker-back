@@ -77,14 +77,9 @@ export class EnvelopesService {
     const result = new EnvelopeListDto();
     result.month = key;
     result.readyToAssignMinor = state.readyToAssignMinor;
-    result.items = rows.map((row, index) => {
-      const line = new EnvelopeLineDto();
-      line.envelope = EnvelopeDto.fromEntity(row);
-      line.assignedMinor = state.envelopes[index].assignedMinor;
-      line.spentMinor = state.envelopes[index].spentMinor;
-      line.availableMinor = state.envelopes[index].availableMinor;
-      return line;
-    });
+    result.items = rows.map((row, index) =>
+      EnvelopeLineDto.build(row, state.envelopes[index], key),
+    );
     return result;
   }
 
