@@ -15,13 +15,14 @@ import { PhotoSuggestionsController } from './photo-suggestions.controller.js';
 import { EnvelopesController } from './envelopes.controller.js';
 import { EnvelopesService } from './envelopes.service.js';
 import { EnvelopeGroup } from './entities/envelope-group.entity.js';
+import { EnvelopeMove } from './entities/envelope-move.entity.js';
 import { Envelope } from './entities/envelope.entity.js';
 
 // Exports EnvelopesService for add-transactions and add-monthly-assignment (it builds the
 // PlanLedger of a plan).
 @Module({
   imports: [
-    TypeOrmModule.forFeature([EnvelopeGroup, Envelope, Plan]),
+    TypeOrmModule.forFeature([EnvelopeGroup, Envelope, EnvelopeMove, Plan]),
     PlansModule,
     AccountsModule,
     BudgetModule,
