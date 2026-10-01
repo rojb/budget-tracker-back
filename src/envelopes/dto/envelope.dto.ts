@@ -50,10 +50,9 @@ export class EnvelopeDto {
   })
   position!: number;
 
-  @ApiPropertyOptional({
-    type: EnvelopeGoalDto,
-    description: 'Absent when the envelope has no goal.',
-  })
+  // Absent when the envelope has no goal. No description here: with one, @nestjs/swagger wraps the
+  // $ref in an allOf and the contract's plain $ref no longer matches.
+  @ApiPropertyOptional({ type: EnvelopeGoalDto })
   goal?: EnvelopeGoalDto;
 
   @ApiPropertyOptional({
@@ -161,18 +160,12 @@ export class EnvelopeLineDto {
   })
   availableMinor!: number;
 
-  @ApiProperty({
-    enum: ENVELOPE_STATES,
-    enumName: 'EnvelopeState',
-    description:
-      'Derived state of the envelope in the month, computed only by the API: `overspent` when its Available is negative; otherwise `underfunded` when it has a goal and the amount assigned in the month is lower than the required amount; otherwise `funded`.',
-  })
+  // Derived by goal-status.ts only: overspent, else underfunded (goal not covered), else funded.
+  @ApiProperty({ enum: ENVELOPE_STATES, enumName: 'EnvelopeState' })
   state!: EnvelopeState;
 
-  @ApiPropertyOptional({
-    type: GoalStatusDto,
-    description: 'Present only when the envelope has a goal.',
-  })
+  // Present only when the envelope has a goal.
+  @ApiPropertyOptional({ type: GoalStatusDto })
   goalStatus?: GoalStatusDto;
 
   // One line of the month: the figures the budget engine derived plus what goal-status.ts says of

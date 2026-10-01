@@ -15,12 +15,7 @@ const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 // The goal of an envelope (capability `envelope-goals`). The cross-field rules (a monthly goal has
 // no due date, a goal with a date needs one, not in a past month) are checked by EnvelopesService.
 export class EnvelopeGoalDto {
-  @ApiProperty({
-    enum: GOAL_TYPES,
-    enumName: 'EnvelopeGoalType',
-    description:
-      '`monthly` is an amount to assign every month; `targetByDate` is an amount to have available by a due date.',
-  })
+  @ApiProperty({ enum: GOAL_TYPES, enumName: 'EnvelopeGoalType' })
   @IsIn(GOAL_TYPES)
   type!: GoalType;
 

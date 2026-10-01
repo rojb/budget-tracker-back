@@ -11,7 +11,6 @@ import {
   ApiOkResponse,
   ApiOperation,
   ApiParam,
-  ApiProduces,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
@@ -68,7 +67,6 @@ export class PhotoSuggestionsController {
       'Id of a suggested goal photo (`vacaciones`, `auto`, `emergencia` or `mudanza`).',
     example: 'vacaciones',
   })
-  @ApiProduces('image/jpeg')
   @ApiOkResponse({
     description: 'The image.',
     content: { 'image/jpeg': { schema: { type: 'string', format: 'binary' } } },

@@ -22,7 +22,6 @@ import {
   ApiOkResponse,
   ApiOperation,
   ApiParam,
-  ApiProduces,
   ApiResponse,
   ApiTags,
   ApiUnauthorizedResponse,
@@ -85,7 +84,6 @@ export class EnvelopePhotosController {
   })
   @planIdParam
   @envelopeIdParam
-  @ApiProduces('image/jpeg')
   @ApiOkResponse({
     description: 'The photo, a JPEG resized to at most 1080 pixels wide.',
     content: { 'image/jpeg': { schema: { type: 'string', format: 'binary' } } },
