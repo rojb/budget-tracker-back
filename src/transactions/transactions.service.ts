@@ -9,6 +9,7 @@ import {
   DataSource,
   In,
   IsNull,
+  Not,
   Repository,
   type SelectQueryBuilder,
 } from 'typeorm';
@@ -377,6 +378,68 @@ export class TransactionsService {
       ),
       current.plan.timeZone,
       current.occurredAt,
+    );
+  }
+
+  // Logical deletion: the row and its portions stay so `restore` gives back exactly the same
+  // transaction, while every reader of the facts ignores it.
+  async remove(
+    planId: string,
+    transactionId: string,
+  ): Promise<AffectedMonthsDto> {
+    const current = await this.requireLive(planId, transactionId);
+    const updated = await this.transactions.update(
+      { id: current.id, deletedAt: IsNull() },
+      { deletedAt: new Date() },
+    );
+    if (!updated.affected) {
+      throw new NotFoundException('Transaction not found');
+    }
+    return this.affected(current.plan.timeZone, current.occurredAt);
+  }
+
+  async restore(
+    planId: string,
+    transactionId: string,
+  ): Promise<TransactionChangeDto> {
+    const deleted = await this.transactions
+      .createQueryBuilder('transaction')
+      .innerJoinAndSelect('transaction.account', 'account')
+      .innerJoinAndSelect('transaction.plan', 'plan')
+      .leftJoinAndSelect('transaction.payee', 'payee')
+      .where('transaction.id = :transactionId', { transactionId })
+      .andWhere('transaction.planId = :planId', { planId })
+      .andWhere('transaction.deletedAt IS NOT NULL')
+      .getOne();
+    if (!deleted) {
+      throw new NotFoundException('Transaction not found');
+    }
+    const updated = await this.transactions.update(
+      { id: deleted.id, deletedAt: Not(IsNull()) },
+      { deletedAt: null },
+    );
+    if (!updated.affected) {
+      throw new NotFoundException('Transaction not found');
+    }
+    const portions = await this.splits.find({
+      where: { transactionId: deleted.id },
+      relations: { envelope: true },
+      order: { position: 'ASC' },
+    });
+    return this.change(
+      TransactionDto.fromEntity(
+        deleted,
+        portions.map((portion) =>
+          this.splitDto(
+            portion.envelopeId,
+            portion.envelope?.name,
+            portion.amountMinor,
+          ),
+        ),
+        { accountName: deleted.account.name, payeeName: deleted.payee?.name },
+      ),
+      deleted.plan.timeZone,
+      deleted.occurredAt,
     );
   }
 

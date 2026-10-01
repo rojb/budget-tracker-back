@@ -1,4 +1,14 @@
-import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Put,
+  Query,
+} from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiConflictResponse,
@@ -19,6 +29,7 @@ import { READ_ROLES, WRITE_ROLES } from '../plans/plan-role.js';
 import type { User } from '../users/entities/user.entity.js';
 import { CreateTransactionDto } from './dto/create-transaction.dto.js';
 import {
+  AffectedMonthsDto,
   ListTransactionsQueryDto,
   TransactionChangeDto,
   TransactionDto,
@@ -135,5 +146,59 @@ export class TransactionsController {
   ): Promise<TransactionChangeDto> {
     await this.access.require(planId, user.id, WRITE_ROLES);
     return this.transactions.update(planId, transactionId, dto);
+  }
+
+  @Delete(':transactionId')
+  @ApiOperation({
+    operationId: 'deleteTransaction',
+    summary: 'Delete a transaction logically (owner or editor)',
+    description:
+      'The transaction stops counting everywhere (list, summary, balances, activity, payee counts) but is kept, so `restoreTransaction` brings it back exactly. Deleting one that is already deleted is `404`.',
+  })
+  @planIdParam
+  @transactionIdParam
+  @ApiOkResponse({
+    description:
+      'The transaction was deleted; the months whose figures were recalculated.',
+    type: AffectedMonthsDto,
+  })
+  @badRequest
+  @unauthorized
+  @forbidden
+  @notFound
+  async remove(
+    @CurrentUser() user: User,
+    @Param('planId', parseUuid('planId')) planId: string,
+    @Param('transactionId', parseUuid('transactionId')) transactionId: string,
+  ): Promise<AffectedMonthsDto> {
+    await this.access.require(planId, user.id, WRITE_ROLES);
+    return this.transactions.remove(planId, transactionId);
+  }
+
+  @Post(':transactionId/restore')
+  @HttpCode(200)
+  @ApiOperation({
+    operationId: 'restoreTransaction',
+    summary: 'Restore a deleted transaction (owner or editor)',
+    description:
+      'Gives back the transaction with the same id, creation instant, amount, account, payee, date, description and portions it had when it was deleted. Restoring one that is not deleted is `404`.',
+  })
+  @planIdParam
+  @transactionIdParam
+  @ApiOkResponse({
+    description: 'The restored transaction.',
+    type: TransactionChangeDto,
+  })
+  @badRequest
+  @unauthorized
+  @forbidden
+  @notFound
+  async restore(
+    @CurrentUser() user: User,
+    @Param('planId', parseUuid('planId')) planId: string,
+    @Param('transactionId', parseUuid('transactionId')) transactionId: string,
+  ): Promise<TransactionChangeDto> {
+    await this.access.require(planId, user.id, WRITE_ROLES);
+    return this.transactions.restore(planId, transactionId);
   }
 }
