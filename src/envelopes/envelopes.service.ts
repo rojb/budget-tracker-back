@@ -23,6 +23,7 @@ import { TransactionLedgerService } from '../transactions/transaction-ledger.ser
 import { TransactionsService } from '../transactions/transactions.service.js';
 import { EnvelopeDetailDto } from './dto/envelope-detail.dto.js';
 import { EnvelopeGoalDto } from './dto/envelope-goal.dto.js';
+import { EnvelopeMoveDto } from './dto/envelope-move.dto.js';
 import {
   MoveMoneyResultDto,
   type MoveMoneyRequestDto,
@@ -133,6 +134,12 @@ export class EnvelopesService {
     result.carryoverMinor = state.envelopes[index].carryoverMinor;
     result.activity = activity.items;
     result.activityTotal = activity.total;
+    const moves = await this.moves.forEnvelope(planId, envelope.id, key);
+    const liveNames = new Map(rows.map((row) => [row.id, row.name]));
+    result.moves = moves.items.map((move) =>
+      EnvelopeMoveDto.build(move, envelope.id, liveNames),
+    );
+    result.movesTotal = moves.total;
     return result;
   }
 
@@ -217,6 +224,8 @@ export class EnvelopesService {
     return EnvelopeDto.fromEntity(await this.saveUnique(envelope));
   }
 
+  // The moves it took part in stay in the other envelope's history (ON DELETE SET NULL, with the
+  // names stored); moves whose two envelopes are gone are removed.
   // The envelope's assignments go with it (FK ON DELETE CASCADE), so its money returns to Ready
   // to Assign; payees that suggested it lose the suggestion (ON DELETE SET NULL). Transactions keep
   // existing: their portions that used it lose the envelope (ON DELETE SET NULL, "Sin sobre").
@@ -224,6 +233,7 @@ export class EnvelopesService {
   async remove(planId: string, envelopeId: string): Promise<void> {
     const envelope = await this.find(planId, envelopeId);
     await this.envelopes.delete({ id: envelopeId, planId });
+    await this.moves.discardOrphans(planId);
     if (envelope.photoFile) {
       await this.photos.discard(envelope.photoFile);
     }

@@ -180,7 +180,7 @@ export class EnvelopesController {
     operationId: 'moveMoney',
     summary: 'Move money between two envelopes inside a month (owner or editor)',
     description:
-      "Subtracts the amount from the source's assignment of the month and adds it to the destination's, atomically and without creating a transaction. Ready to Assign, the other envelopes and the other months do not change. The amount cannot exceed the source's Available in that month (`409`).",
+      "Subtracts the amount from the source's assignment of the month and adds it to the destination's, atomically and without creating a transaction. Ready to Assign, the other envelopes and the other months do not change. The amount cannot exceed the source's Available in that month (`409`). Each successful move is recorded, in the same atomic operation, and listed in `moves` of the detail of both envelopes; a refused move records nothing.",
   })
   @planIdParam
   @ApiOkResponse({
@@ -228,7 +228,7 @@ export class EnvelopesController {
     operationId: 'getEnvelopeDetail',
     summary: 'Get an envelope with the figures and the activity of a month',
     description:
-      "The envelope line of the month (figures, state, goal status), its carryover and the month's transactions that have a portion on the envelope, newest first by `createdAt` (ties by id), at most 100.",
+      "The envelope line of the month (figures, state, goal status), its carryover, the month's transactions that have a portion on the envelope (`activity`) and the month's moves of money between envelopes in which it took part (`moves`), each list newest first by `createdAt` (ties by id), at most 100.",
   })
   @planIdParam
   @envelopeIdParam
