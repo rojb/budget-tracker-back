@@ -312,6 +312,45 @@ traen `state` y, con meta, `goalStatus`.
 - **Fotos sugeridas.** Las cuatro de `design/photos` están en `assets/suggested-photos/` y pasan por el
   mismo redimensionado al elegirlas.
 
+## Plan del mes, asignación y cierre de mes
+
+Cambio `add-monthly-assignment` (RRG-51). Módulo `src/months/` (FR-09, FR-10, FR-11, FR-12, FR-15,
+FR-16): lee las líneas y el `PlanLedger` de `EnvelopesService` y solo escribe asignaciones y la
+confirmación del cierre.
+
+| Endpoint | Rol | Qué hace |
+|---|---|---|
+| `GET /plans/:planId/months/:month` | miembro | Cifras del mes: `currentMonth`, `isFuture`, Σ saldos, Σ disponible, reservado a meses siguientes, Listo para asignar, Σ asignado y cuántos sobres hay sobregirados, con falta y cubiertos |
+| `POST /plans/:planId/months/:month/assignments` | `owner`, `editor` | Suma `amountMinor` (entero ≠ 0; negativo devuelve dinero) a la asignación de `envelopeId` en ese mes, pasado, actual o futuro; devuelve la línea del sobre y el Listo para asignar |
+| `GET /plans/:planId/months/:month/close` | miembro | Cierre del mes al siguiente: sobres que arrastran, sobregiros que se descuentan, cifras del mes siguiente para el cuadre (`balance − available − futureAssigned = readyToAssignTo`) y `confirmed` |
+| `POST /plans/:planId/months/:month/close` | `owner`, `editor` | Confirma el cierre de un mes ya terminado (409 si es el actual o uno futuro); repetirlo no cambia nada |
+
+- **Asignar suma.** Usa `AssignmentsService.shiftAssignments`: la base aplica el delta en una sola
+  sentencia, así dos asignaciones simultáneas no se pisan. Sigue habiendo una fila por sobre y mes.
+  Asignar más de lo disponible se permite y deja Listo para asignar en negativo.
+- **El cierre no guarda cifras.** El arrastre y el saldado de sobregiros ya los deriva el motor
+  (`CalculationService.closeMonth`). Lo único que se guarda es `budget_months.closed_at`, cuándo se
+  confirmó el cierre (pantalla 25), para no volver a mostrarlo.
+- Mes inválido (`2026-13`, `2026-9`) → 400; sobre de otro plan → 404.
+
+## Reportes
+
+Cambio `add-reports` (RRG-54). Módulo `src/reports/` (FR-26), solo lectura y sin migración.
+
+| Endpoint | Rol | Qué hace |
+|---|---|---|
+| `GET /plans/:planId/reports/spending?from&to` | miembro | Por mes: lo gastado de cada sobre (gastos menos ingresos al sobre), solo los que gastaron, de mayor a menor, y el total |
+| `GET /plans/:planId/reports/income-expense?from&to` | miembro | Por mes: suma de ingresos y de gastos del plan (las transferencias no cuentan) |
+| `GET /plans/:planId/reports/net-worth?from&to` | miembro | Por mes: Σ saldos de las cuentas activas al cierre del mes |
+
+- **Rango.** `from` y `to` son meses `YYYY-MM`; sin `to`, el mes actual del plan; sin `from`, cinco
+  meses antes de `to`. `from > to` o más de 24 meses → 400. Siempre devuelve un elemento por mes,
+  con 0 en los meses sin movimientos.
+- **Mismas fuentes que el resto de la app.** El gasto sale de `TransactionLedgerService.spending`,
+  el patrimonio de `AccountsService.ledgerBalanceMovements` (acumulado desde el primer movimiento) e
+  ingresos/gastos de una lectura agrupada de `transactions`; todo por mes en la zona horaria del
+  plan y sin los movimientos borrados.
+
 ## Scripts principales
 
 | Script | Qué hace |

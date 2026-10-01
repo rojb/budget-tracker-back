@@ -120,6 +120,9 @@ export class CalculationService {
       totalDeductedMinor: from.overspentMinor,
       readyToAssignFromMinor: from.readyToAssignMinor,
       readyToAssignToMinor: to.readyToAssignMinor,
+      toBalanceMinor: to.balanceMinor,
+      toAvailableMinor: to.availableMinor,
+      toFutureAssignedMinor: to.futureAssignedMinor,
     };
   }
 

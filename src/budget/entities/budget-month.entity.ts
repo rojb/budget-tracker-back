@@ -9,7 +9,8 @@ import {
 } from 'typeorm';
 import { Assignment } from './assignment.entity.js';
 
-// A budget month of a plan. It only groups facts (assignments); nothing derived is stored.
+// A budget month of a plan. It only groups facts (assignments) and the close confirmation; nothing
+// derived is stored.
 @Entity({ name: 'budget_months' })
 @Unique('UQ_budget_months_plan_month', ['planId', 'month'])
 export class BudgetMonth {
@@ -26,6 +27,11 @@ export class BudgetMonth {
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
+
+  // When the close of this month into the next one was confirmed (screen 25); null until then.
+  // A flag only: confirming changes no figure.
+  @Column({ name: 'closed_at', type: 'timestamptz', nullable: true })
+  closedAt!: Date | null;
 
   @OneToMany(() => Assignment, (assignment) => assignment.budgetMonth)
   assignments!: Relation<Assignment>[];

@@ -7,8 +7,10 @@ import { AppService } from './app.service.js';
 import { AuthModule } from './auth/auth.module.js';
 import { BudgetModule } from './budget/budget.module.js';
 import { EnvelopesModule } from './envelopes/envelopes.module.js';
+import { MonthsModule } from './months/months.module.js';
 import { PayeesModule } from './payees/payees.module.js';
 import { PlansModule } from './plans/plans.module.js';
+import { ReportsModule } from './reports/reports.module.js';
 import { SharingModule } from './sharing/sharing.module.js';
 import { TransactionsModule } from './transactions/transactions.module.js';
 import { envValidationSchema } from './config/env.validation.js';
@@ -40,6 +42,8 @@ import { UsersModule } from './users/users.module.js';
     AccountsModule,
     PayeesModule,
     EnvelopesModule,
+    MonthsModule,
+    ReportsModule,
     TransactionsModule,
     SharingModule,
   ],
