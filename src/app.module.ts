@@ -10,6 +10,7 @@ import { EnvelopesModule } from './envelopes/envelopes.module.js';
 import { MonthsModule } from './months/months.module.js';
 import { PayeesModule } from './payees/payees.module.js';
 import { PlansModule } from './plans/plans.module.js';
+import { ReportsModule } from './reports/reports.module.js';
 import { SharingModule } from './sharing/sharing.module.js';
 import { TransactionsModule } from './transactions/transactions.module.js';
 import { envValidationSchema } from './config/env.validation.js';
@@ -42,6 +43,7 @@ import { UsersModule } from './users/users.module.js';
     PayeesModule,
     EnvelopesModule,
     MonthsModule,
+    ReportsModule,
     TransactionsModule,
     SharingModule,
   ],
