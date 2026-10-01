@@ -11,6 +11,7 @@ import { EnvelopeGroupsService } from './envelope-groups.service.js';
 import { EnvelopePhotosController } from './envelope-photos.controller.js';
 import { EnvelopePhotosService } from './envelope-photos.service.js';
 import { EnvelopeTemplateController } from './envelope-template.controller.js';
+import { PhotoSuggestionsController } from './photo-suggestions.controller.js';
 import { EnvelopesController } from './envelopes.controller.js';
 import { EnvelopesService } from './envelopes.service.js';
 import { EnvelopeGroup } from './entities/envelope-group.entity.js';
@@ -32,6 +33,7 @@ import { Envelope } from './entities/envelope.entity.js';
     EnvelopesController,
     EnvelopePhotosController,
     EnvelopeTemplateController,
+    PhotoSuggestionsController,
   ],
   providers: [EnvelopeGroupsService, EnvelopePhotosService, EnvelopesService],
   exports: [EnvelopeGroupsService, EnvelopesService],

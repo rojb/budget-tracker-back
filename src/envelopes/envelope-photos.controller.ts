@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  Body,
   Controller,
   Delete,
   Get,
@@ -33,6 +34,7 @@ import { PlanAccessService } from '../plans/plan-access.service.js';
 import { READ_ROLES, WRITE_ROLES } from '../plans/plan-role.js';
 import type { User } from '../users/entities/user.entity.js';
 import { EnvelopeDto } from './dto/envelope.dto.js';
+import { SuggestedPhotoRequestDto } from './dto/photo.dto.js';
 import {
   EnvelopePhotosService,
   PHOTO_MAX_BYTES,
@@ -158,6 +160,35 @@ export class EnvelopePhotosController {
       throw new BadRequestException(['file is required']);
     }
     return this.photos.set(planId, envelopeId, file.buffer);
+  }
+
+  @Post('suggested')
+  @HttpCode(200)
+  @ApiOperation({
+    operationId: 'applySuggestedEnvelopePhoto',
+    summary:
+      'Set a suggested photo as the photo of an envelope (owner or editor)',
+    description:
+      'The suggestion goes through the same resizing and storage as an upload.',
+  })
+  @planIdParam
+  @envelopeIdParam
+  @ApiOkResponse({
+    description: 'The envelope with its new `photoUrl`.',
+    type: EnvelopeDto,
+  })
+  @badRequest
+  @unauthorized
+  @forbidden
+  @notFound
+  async applySuggested(
+    @CurrentUser() user: User,
+    @Param('planId', parseUuid('planId')) planId: string,
+    @Param('envelopeId', parseUuid('envelopeId')) envelopeId: string,
+    @Body() dto: SuggestedPhotoRequestDto,
+  ): Promise<EnvelopeDto> {
+    await this.access.require(planId, user.id, WRITE_ROLES);
+    return this.photos.setSuggested(planId, envelopeId, dto.suggestionId);
   }
 
   @Delete()

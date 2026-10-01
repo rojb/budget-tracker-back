@@ -1,8 +1,9 @@
 import { randomBytes } from 'node:crypto';
 import { createReadStream, type ReadStream } from 'node:fs';
-import { mkdir, stat, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve, sep } from 'node:path';
 import {
+  BadRequestException,
   Injectable,
   NotFoundException,
   UnsupportedMediaTypeException,
@@ -14,6 +15,7 @@ import { Repository } from 'typeorm';
 import { EnvelopeDto } from './dto/envelope.dto.js';
 import { Envelope } from './entities/envelope.entity.js';
 import { detectImageKind } from './image-signature.js';
+import { findPhotoSuggestion } from './photo-suggestions.js';
 
 // Largest upload accepted (FR-41) and the width every stored photo is resized to at most.
 export const PHOTO_MAX_BYTES = 5 * 1024 * 1024;
@@ -72,6 +74,20 @@ export class EnvelopePhotosService {
       await this.discard(previous);
     }
     return EnvelopeDto.fromEntity(envelope);
+  }
+
+  // A suggested photo goes through the same resize and storage as an upload, so replacing or
+  // removing it needs no special case.
+  async setSuggested(
+    planId: string,
+    envelopeId: string,
+    suggestionId: string,
+  ): Promise<EnvelopeDto> {
+    const suggestion = findPhotoSuggestion(suggestionId);
+    if (!suggestion) {
+      throw new BadRequestException(['suggestionId is not a known suggestion']);
+    }
+    return this.set(planId, envelopeId, await readFile(suggestion.file));
   }
 
   // Removing a photo the envelope does not have is not an error.
