@@ -67,6 +67,9 @@ const NO_GOAL: GoalColumns = {
 // Callers check membership and role with PlanAccessService before using these methods.
 @Injectable()
 export class EnvelopesService {
+  // Moves of a plan waiting for their turn (see serialized).
+  private readonly queues = new Map<string, Promise<void>>();
+
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     @InjectRepository(Envelope)
@@ -301,7 +304,8 @@ export class EnvelopesService {
   // gives it to the destination's, as one atomic change of the budget engine's assignment facts, so
   // Ready to Assign and every other envelope and month stay as they were. The amount cannot be
   // more than the source has available in the month (carryover included): 24 shows no overspent
-  // source, and overspending is a state that spending causes, not a move.
+  // source, and overspending is a state that spending causes, not a move. (An expense recorded at
+  // the same instant is not serialized with a move and can still leave the source overspent.)
   async moveMoney(
     planId: string,
     dto: MoveMoneyRequestDto,
@@ -319,19 +323,23 @@ export class EnvelopesService {
     if (fromIndex < 0 || toIndex < 0) {
       throw new NotFoundException('Envelope not found');
     }
-    const before = this.calculation.calculateMonth(
-      await this.ledger(plan, rows),
-      month,
-    );
-    if (dto.amountMinor > before.envelopes[fromIndex].availableMinor) {
-      throw new ConflictException(
-        'The source envelope has less available than the amount',
+    // The check and the change of two moves of the same plan run one after the other, so the second
+    // one sees the first one's result and they can never both spend the same available money.
+    await this.serialized(planId, async () => {
+      const before = this.calculation.calculateMonth(
+        await this.ledger(plan, rows),
+        month,
       );
-    }
-    await this.assignments.shiftAssignments(planId, month, [
-      { envelopeId: dto.fromEnvelopeId, deltaMinor: -dto.amountMinor },
-      { envelopeId: dto.toEnvelopeId, deltaMinor: dto.amountMinor },
-    ]);
+      if (dto.amountMinor > before.envelopes[fromIndex].availableMinor) {
+        throw new ConflictException(
+          'The source envelope has less available than the amount',
+        );
+      }
+      await this.assignments.shiftAssignments(planId, month, [
+        { envelopeId: dto.fromEnvelopeId, deltaMinor: -dto.amountMinor },
+        { envelopeId: dto.toEnvelopeId, deltaMinor: dto.amountMinor },
+      ]);
+    });
     const after = this.calculation.calculateMonth(
       await this.ledger(plan, rows),
       month,
@@ -414,6 +422,25 @@ export class EnvelopesService {
     result.envelopes = (await this.ordered(planId)).map((row) =>
       EnvelopeDto.fromEntity(row),
     );
+    return result;
+  }
+
+  // Runs `work` after the work already queued for `key` has finished (a failure does not block the
+  // queue). The app runs as one process, so an in-memory queue is enough, and it holds no database
+  // connection while it waits (a lock held in a transaction would starve the pool under load).
+  private serialized<T>(key: string, work: () => Promise<T>): Promise<T> {
+    const previous = this.queues.get(key) ?? Promise.resolve();
+    const result = previous.then(work, work);
+    const tail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.queues.set(key, tail);
+    void tail.then(() => {
+      if (this.queues.get(key) === tail) {
+        this.queues.delete(key);
+      }
+    });
     return result;
   }
 
