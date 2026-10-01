@@ -29,6 +29,7 @@ import { parseUuid } from '../common/pipes/parse-uuid.pipe.js';
 import { PlanAccessService } from '../plans/plan-access.service.js';
 import { READ_ROLES, WRITE_ROLES } from '../plans/plan-role.js';
 import type { User } from '../users/entities/user.entity.js';
+import { EnvelopeGoalDto } from './dto/envelope-goal.dto.js';
 import {
   CreateEnvelopeDto,
   EnvelopeDto,
@@ -206,6 +207,58 @@ export class EnvelopesController {
   ): Promise<EnvelopeDto> {
     await this.access.require(planId, user.id, WRITE_ROLES);
     return this.envelopes.update(planId, envelopeId, dto);
+  }
+
+  @Put(':envelopeId/goal')
+  @ApiOperation({
+    operationId: 'setEnvelopeGoal',
+    summary: 'Set or replace the goal of an envelope (owner or editor)',
+    description:
+      'A `monthly` goal takes no `dueDate`; a `targetByDate` goal requires one, in the current month or later.',
+  })
+  @planIdParam
+  @envelopeIdParam
+  @ApiOkResponse({
+    description: 'The envelope with its goal.',
+    type: EnvelopeDto,
+  })
+  @badRequest
+  @unauthorized
+  @forbidden
+  @notFound
+  async setGoal(
+    @CurrentUser() user: User,
+    @Param('planId', parseUuid('planId')) planId: string,
+    @Param('envelopeId', parseUuid('envelopeId')) envelopeId: string,
+    @Body() dto: EnvelopeGoalDto,
+  ): Promise<EnvelopeDto> {
+    await this.access.require(planId, user.id, WRITE_ROLES);
+    return this.envelopes.setGoal(planId, envelopeId, dto);
+  }
+
+  @Delete(':envelopeId/goal')
+  @ApiOperation({
+    operationId: 'clearEnvelopeGoal',
+    summary: 'Remove the goal of an envelope (owner or editor)',
+    description: 'Responds `200` also when the envelope had no goal.',
+  })
+  @planIdParam
+  @envelopeIdParam
+  @ApiOkResponse({
+    description: 'The envelope without a goal.',
+    type: EnvelopeDto,
+  })
+  @badRequest
+  @unauthorized
+  @forbidden
+  @notFound
+  async clearGoal(
+    @CurrentUser() user: User,
+    @Param('planId', parseUuid('planId')) planId: string,
+    @Param('envelopeId', parseUuid('envelopeId')) envelopeId: string,
+  ): Promise<EnvelopeDto> {
+    await this.access.require(planId, user.id, WRITE_ROLES);
+    return this.envelopes.clearGoal(planId, envelopeId);
   }
 
   @Delete(':envelopeId')

@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Transform } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   ArrayUnique,
   IsArray,
@@ -10,11 +10,13 @@ import {
   IsUUID,
   Matches,
   MaxLength,
+  ValidateNested,
 } from 'class-validator';
 import { trim } from '../../auth/dto/register.dto.js';
 import { MONTH_KEY_PATTERN } from '../../budget/month-key.js';
 import type { Envelope } from '../entities/envelope.entity.js';
 import { ENVELOPE_ICONS, type EnvelopeIcon } from '../envelope-icons.js';
+import { EnvelopeGoalDto } from './envelope-goal.dto.js';
 
 const MONTH_PATTERN = '^\\d{4}-(0[1-9]|1[0-2])$';
 
@@ -42,6 +44,20 @@ export class EnvelopeDto {
   })
   position!: number;
 
+  @ApiPropertyOptional({
+    type: EnvelopeGoalDto,
+    description: 'Absent when the envelope has no goal.',
+  })
+  goal?: EnvelopeGoalDto;
+
+  @ApiPropertyOptional({
+    description:
+      "Path, relative to the API, of the envelope's photo (served only to members with a bearer token). It carries a `v` version query, so a changed photo is a new URL. Absent when the envelope has no photo.",
+    example:
+      '/plans/0d9c1d7e-6a0c-4a77-9d0e-6d1f2a3b4c5d/envelopes/7f1f6a64-3a60-4d5c-9a43-0a5c8c1f2b11/photo?v=1790000000000',
+  })
+  photoUrl?: string;
+
   @ApiProperty({ format: 'date-time' })
   createdAt!: string;
 
@@ -54,6 +70,18 @@ export class EnvelopeDto {
       dto.groupId = envelope.groupId;
     }
     dto.position = envelope.position;
+    if (envelope.goalType !== null && envelope.goalTargetMinor !== null) {
+      const goal = new EnvelopeGoalDto();
+      goal.type = envelope.goalType;
+      goal.targetMinor = envelope.goalTargetMinor;
+      if (envelope.goalDueDate) {
+        goal.dueDate = envelope.goalDueDate;
+      }
+      dto.goal = goal;
+    }
+    if (envelope.photoFile && envelope.photoUpdatedAt) {
+      dto.photoUrl = `/plans/${envelope.planId}/envelopes/${envelope.id}/photo?v=${envelope.photoUpdatedAt.getTime()}`;
+    }
     dto.createdAt = envelope.createdAt.toISOString();
     return dto;
   }
@@ -122,6 +150,12 @@ export class CreateEnvelopeDto {
   @IsOptional()
   @IsIn(ENVELOPE_ICONS)
   icon?: EnvelopeIcon;
+
+  @ApiPropertyOptional({ type: EnvelopeGoalDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => EnvelopeGoalDto)
+  goal?: EnvelopeGoalDto;
 }
 
 // Only the fields sent change; an empty body is rejected by EnvelopesService.

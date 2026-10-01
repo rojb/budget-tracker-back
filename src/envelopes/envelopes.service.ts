@@ -10,10 +10,15 @@ import { AccountsService } from '../accounts/accounts.service.js';
 import { AssignmentsService } from '../budget/assignments.service.js';
 import { CalculationService } from '../budget/calculation.service.js';
 import type { PlanLedger } from '../budget/calculation.types.js';
-import { currentMonth, type MonthKey } from '../budget/month-key.js';
+import {
+  compareMonths,
+  currentMonth,
+  type MonthKey,
+} from '../budget/month-key.js';
 import { isUniqueViolation } from '../common/database/unique-violation.js';
 import { Plan } from '../plans/entities/plan.entity.js';
 import { TransactionLedgerService } from '../transactions/transaction-ledger.service.js';
+import { EnvelopeGoalDto } from './dto/envelope-goal.dto.js';
 import {
   EnvelopeDto,
   EnvelopeLineDto,
@@ -27,10 +32,22 @@ import {
 } from './dto/initial-assignment.dto.js';
 import { EnvelopeTemplateResultDto } from './dto/envelope-template.dto.js';
 import { EnvelopeGroup } from './entities/envelope-group.entity.js';
-import { Envelope } from './entities/envelope.entity.js';
+import { Envelope, type GoalType } from './entities/envelope.entity.js';
 import { EnvelopeGroupsService } from './envelope-groups.service.js';
 import { DEFAULT_ENVELOPE_ICON } from './envelope-icons.js';
 import { ENVELOPE_TEMPLATE } from './envelope-template.js';
+
+interface GoalColumns {
+  goalType: GoalType | null;
+  goalTargetMinor: number | null;
+  goalDueDate: string | null;
+}
+
+const NO_GOAL: GoalColumns = {
+  goalType: null,
+  goalTargetMinor: null,
+  goalDueDate: null,
+};
 
 // Callers check membership and role with PlanAccessService before using these methods.
 @Injectable()
@@ -91,6 +108,9 @@ export class EnvelopesService {
     if (dto.groupId) {
       await this.requireGroup(planId, dto.groupId);
     }
+    const goal = dto.goal
+      ? await this.goalColumns(planId, dto.goal)
+      : NO_GOAL;
     const envelope = await this.saveUnique(
       this.envelopes.create({
         planId,
@@ -98,9 +118,31 @@ export class EnvelopesService {
         name: dto.name,
         icon: dto.icon ?? DEFAULT_ENVELOPE_ICON,
         position: await this.nextPosition(planId, dto.groupId ?? null),
+        ...goal,
+        photoFile: null,
+        photoUpdatedAt: null,
       }),
     );
     return EnvelopeDto.fromEntity(envelope);
+  }
+
+  // Sets or replaces the goal (capability envelope-goals). Only the intent is stored; the required
+  // amount and the state are derived by goal-status.ts on every read.
+  async setGoal(
+    planId: string,
+    envelopeId: string,
+    dto: EnvelopeGoalDto,
+  ): Promise<EnvelopeDto> {
+    const envelope = await this.find(planId, envelopeId);
+    Object.assign(envelope, await this.goalColumns(planId, dto));
+    return EnvelopeDto.fromEntity(await this.envelopes.save(envelope));
+  }
+
+  // Removing a goal the envelope does not have is not an error.
+  async clearGoal(planId: string, envelopeId: string): Promise<EnvelopeDto> {
+    const envelope = await this.find(planId, envelopeId);
+    Object.assign(envelope, NO_GOAL);
+    return EnvelopeDto.fromEntity(await this.envelopes.save(envelope));
   }
 
   async get(planId: string, envelopeId: string): Promise<EnvelopeDto> {
@@ -289,6 +331,42 @@ export class EnvelopesService {
       .addOrderBy('envelope.position', 'ASC')
       .addOrderBy('envelope.createdAt', 'ASC')
       .getMany();
+  }
+
+  // The columns of a goal, after the rules that need more than one field or the plan: a monthly
+  // goal has no due date, a goal with a date needs one, and not in a month already over.
+  private async goalColumns(
+    planId: string,
+    goal: EnvelopeGoalDto,
+  ): Promise<GoalColumns> {
+    if (goal.type === 'monthly') {
+      if (goal.dueDate !== undefined) {
+        throw new BadRequestException([
+          'dueDate must not be sent for a monthly goal',
+        ]);
+      }
+      return {
+        goalType: 'monthly',
+        goalTargetMinor: goal.targetMinor,
+        goalDueDate: null,
+      };
+    }
+    if (goal.dueDate === undefined) {
+      throw new BadRequestException([
+        'dueDate is required for a targetByDate goal',
+      ]);
+    }
+    const plan = await this.plans.findOneByOrFail({ id: planId });
+    if (
+      compareMonths(goal.dueDate.slice(0, 7), currentMonth(plan.timeZone)) < 0
+    ) {
+      throw new BadRequestException(['dueDate must not be in a past month']);
+    }
+    return {
+      goalType: 'targetByDate',
+      goalTargetMinor: goal.targetMinor,
+      goalDueDate: goal.dueDate,
+    };
   }
 
   private async requireGroup(planId: string, groupId: string): Promise<void> {
