@@ -30,10 +30,10 @@ Make the API deployable on Vercel (NestJS zero-config Function) with a managed P
 - With `PHOTOS_STORAGE=blob`, upload/get/delete/suggested work through Blob, and the controller still streams the bytes.
 
 ## Progress / Evidence
-- T1: f879a8d — build ok, lint ok
-- T2: 74548cc — build ok, lint ok
+- T1: f879a8d - build ok, lint ok
+- T2: 74548cc - build ok, lint ok
+- T3: 2791359 - build ok, lint ok. Blob private access; includeFiles in vercel.json unverified.
 
 ## Next step
 Done; user decides push/PR.
 
-- T3: see git log (`feat(envelopes): add Vercel Blob photo storage`) — build ok, lint ok. Blob private access; includeFiles in vercel.json unverified.
