@@ -372,7 +372,7 @@ The API runs as a single Vercel Function (NestJS zero-config, entrypoint `src/ma
 4. **Migrations**: run them locally against the production database (set the same `DATABASE_*` values and `DATABASE_SSL=true` in your `.env`): `npm run migration:run`.
 5. **Deploy**: `vercel --prod`.
 
-The suggested photos in `assets/suggested-photos/` are bundled with the function through `includeFiles` in `vercel.json`.
+The suggested photos in `assets/suggested-photos/` are bundled with the function by Vercel's file tracer (one literal `new URL` per file in `src/envelopes/photo-suggestions.ts`).
 
 ## Scripts principales
 
