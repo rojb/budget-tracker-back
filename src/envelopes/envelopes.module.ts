@@ -7,6 +7,7 @@ import { Plan } from '../plans/entities/plan.entity.js';
 import { PlansModule } from '../plans/plans.module.js';
 import { TransactionLedgerModule } from '../transactions/transaction-ledger.module.js';
 import { TransactionsModule } from '../transactions/transactions.module.js';
+import { BlobPhotoStorage } from './blob-photo-storage.js';
 import { EnvelopeGroupsController } from './envelope-groups.controller.js';
 import { EnvelopeGroupsService } from './envelope-groups.service.js';
 import { EnvelopePhotosController } from './envelope-photos.controller.js';
@@ -46,9 +47,13 @@ import { Envelope } from './entities/envelope.entity.js';
       provide: PhotoStorage,
       inject: [ConfigService],
       useFactory: (config: ConfigService): PhotoStorage =>
-        new LocalPhotoStorage(
-          config.get<string>('PHOTOS_DIR') ?? 'storage/photos',
-        ),
+        config.get<string>('PHOTOS_STORAGE') === 'blob'
+          ? new BlobPhotoStorage(
+              config.getOrThrow<string>('BLOB_READ_WRITE_TOKEN'),
+            )
+          : new LocalPhotoStorage(
+              config.get<string>('PHOTOS_DIR') ?? 'storage/photos',
+            ),
     },
   ],
   exports: [EnvelopeGroupsService, EnvelopesService],
