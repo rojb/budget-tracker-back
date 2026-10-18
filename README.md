@@ -351,6 +351,29 @@ Cambio `add-reports` (RRG-54). Módulo `src/reports/` (FR-26), solo lectura y si
   ingresos/gastos de una lectura agrupada de `transactions`; todo por mes en la zona horaria del
   plan y sin los movimientos borrados.
 
+## Deploy to Vercel
+
+The API runs as a single Vercel Function (NestJS zero-config, entrypoint `src/main.ts`).
+
+1. **Database**: add Neon from the Vercel Marketplace (or any managed Postgres) and copy its connection parts.
+2. **Photos**: create a Vercel Blob store and connect it to the project; the disk is read-only on Vercel, so photos go to Blob (private access, served only through `GET .../photo`).
+3. **Environment variables** (Project Settings):
+
+| Variable | Value |
+|---|---|
+| `NODE_ENV` | `production` |
+| `DATABASE_HOST`, `DATABASE_PORT`, `DATABASE_USER`, `DATABASE_PASSWORD`, `DATABASE_NAME` | Neon connection values |
+| `DATABASE_SSL` | `true` (managed Postgres requires TLS) |
+| `JWT_SECRET` | random string, at least 32 characters |
+| `JWT_EXPIRES_IN` | e.g. `7d` |
+| `PHOTOS_STORAGE` | `blob` |
+| `BLOB_READ_WRITE_TOKEN` | set by the Blob store integration |
+
+4. **Migrations**: run them locally against the production database (set the same `DATABASE_*` values and `DATABASE_SSL=true` in your `.env`): `npm run migration:run`.
+5. **Deploy**: `vercel --prod`.
+
+The suggested photos in `assets/suggested-photos/` are bundled with the function through `includeFiles` in `vercel.json`.
+
 ## Scripts principales
 
 | Script | Qué hace |
