@@ -10,6 +10,8 @@ export const envValidationSchema = Joi.object({
   DATABASE_USER: Joi.string().required(),
   DATABASE_PASSWORD: Joi.string().required(),
   DATABASE_NAME: Joi.string().required(),
+  // Managed Postgres (Neon, etc.) requires TLS; off by default for the local docker database.
+  DATABASE_SSL: Joi.boolean().default(false),
   JWT_SECRET: Joi.string().min(32).required(),
   JWT_EXPIRES_IN: Joi.string().default('7d'),
   // Root directory of the goal photos (FR-41). Relative paths resolve against the working directory;

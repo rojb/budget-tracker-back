@@ -8,6 +8,7 @@ export default new DataSource({
   username: process.env.DATABASE_USER,
   password: process.env.DATABASE_PASSWORD,
   database: process.env.DATABASE_NAME,
+  ssl: process.env.DATABASE_SSL === 'true',
   entities: ['src/**/entities/*.entity.ts'],
   migrations: ['src/database/migrations/*.ts'],
   synchronize: false,

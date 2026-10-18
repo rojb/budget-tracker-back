@@ -31,6 +31,7 @@ import { UsersModule } from './users/users.module.js';
         username: config.get<string>('DATABASE_USER'),
         password: config.get<string>('DATABASE_PASSWORD'),
         database: config.get<string>('DATABASE_NAME'),
+        ssl: config.get<boolean>('DATABASE_SSL') === true,
         autoLoadEntities: true,
         synchronize: false,
       }),
