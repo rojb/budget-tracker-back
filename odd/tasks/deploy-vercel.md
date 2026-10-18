@@ -21,7 +21,7 @@ Make the API deployable on Vercel (NestJS zero-config Function) with a managed P
 
 ## Tasks
 - [x] T1 — `DATABASE_SSL` (boolean, default false) in env validation; pass `ssl` to `TypeOrmModule` and `data-source.ts`. Route: delegated (writer, part of a 2+ file unit).
-- [ ] T2 — Extract a `PhotoStorage` port (put/get/delete by key) with `LocalPhotoStorage` (current disk logic); `EnvelopePhotosService` depends on the port. No behavior change. Route: delegated.
+- [x] T2 — Extract a `PhotoStorage` port (put/get/delete by key) with `LocalPhotoStorage` (current disk logic); `EnvelopePhotosService` depends on the port. No behavior change. Route: delegated.
 - [ ] T3 — `BlobPhotoStorage` using `@vercel/blob`; `PHOTOS_STORAGE=local|blob` + `BLOB_READ_WRITE_TOKEN` (required when blob); ensure suggested photos are included in the Vercel bundle; README deploy section. Route: delegated.
 
 ## Acceptance criteria
@@ -30,7 +30,8 @@ Make the API deployable on Vercel (NestJS zero-config Function) with a managed P
 - With `PHOTOS_STORAGE=blob`, upload/get/delete/suggested work through Blob, and the controller still streams the bytes.
 
 ## Progress / Evidence
-_(commits recorded per task)_
+- T1: f879a8d � build ok, lint ok
+- T2: see git log (`refactor(envelopes): extract PhotoStorage port`) � build ok, lint ok
 
 ## Next step
-T2.
+T3.
