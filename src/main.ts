@@ -4,6 +4,8 @@ import { SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module.js';
 import { buildOpenApiDocument } from './openapi.js';
 
+// Not awaited at module top level: on Vercel the platform intercepts `listen` and the awaited
+// listen promise never settles, which would keep the module (and every request) pending.
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   app.useGlobalPipes(
@@ -18,4 +20,7 @@ async function bootstrap() {
   }
   await app.listen(process.env.PORT ?? 3000);
 }
-await bootstrap();
+bootstrap().catch((error: unknown) => {
+  console.error(error);
+  process.exit(1);
+});
