@@ -10,6 +10,7 @@ import { TransactionsModule } from '../transactions/transactions.module.js';
 import { BlobPhotoStorage } from './blob-photo-storage.js';
 import { EnvelopeGroupsController } from './envelope-groups.controller.js';
 import { EnvelopeGroupsService } from './envelope-groups.service.js';
+import { EnvelopeMovesService } from './envelope-moves.service.js';
 import { EnvelopePhotosController } from './envelope-photos.controller.js';
 import { EnvelopePhotosService } from './envelope-photos.service.js';
 import { EnvelopeTemplateController } from './envelope-template.controller.js';
@@ -19,13 +20,14 @@ import { PhotoSuggestionsController } from './photo-suggestions.controller.js';
 import { EnvelopesController } from './envelopes.controller.js';
 import { EnvelopesService } from './envelopes.service.js';
 import { EnvelopeGroup } from './entities/envelope-group.entity.js';
+import { EnvelopeMove } from './entities/envelope-move.entity.js';
 import { Envelope } from './entities/envelope.entity.js';
 
 // Exports EnvelopesService for add-transactions and add-monthly-assignment (it builds the
 // PlanLedger of a plan).
 @Module({
   imports: [
-    TypeOrmModule.forFeature([EnvelopeGroup, Envelope, Plan]),
+    TypeOrmModule.forFeature([EnvelopeGroup, Envelope, EnvelopeMove, Plan]),
     PlansModule,
     AccountsModule,
     BudgetModule,
@@ -41,6 +43,7 @@ import { Envelope } from './entities/envelope.entity.js';
   ],
   providers: [
     EnvelopeGroupsService,
+    EnvelopeMovesService,
     EnvelopePhotosService,
     EnvelopesService,
     {

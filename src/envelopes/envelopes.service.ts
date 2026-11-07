@@ -23,6 +23,7 @@ import { TransactionLedgerService } from '../transactions/transaction-ledger.ser
 import { TransactionsService } from '../transactions/transactions.service.js';
 import { EnvelopeDetailDto } from './dto/envelope-detail.dto.js';
 import { EnvelopeGoalDto } from './dto/envelope-goal.dto.js';
+import { EnvelopeMoveDto } from './dto/envelope-move.dto.js';
 import {
   MoveMoneyResultDto,
   type MoveMoneyRequestDto,
@@ -42,6 +43,7 @@ import { EnvelopeTemplateResultDto } from './dto/envelope-template.dto.js';
 import { EnvelopeGroup } from './entities/envelope-group.entity.js';
 import { Envelope, type GoalType } from './entities/envelope.entity.js';
 import { EnvelopeGroupsService } from './envelope-groups.service.js';
+import { EnvelopeMovesService } from './envelope-moves.service.js';
 import { EnvelopePhotosService } from './envelope-photos.service.js';
 import { DEFAULT_ENVELOPE_ICON } from './envelope-icons.js';
 import { ENVELOPE_TEMPLATE } from './envelope-template.js';
@@ -82,6 +84,7 @@ export class EnvelopesService {
     private readonly transactions: TransactionLedgerService,
     private readonly transactionsService: TransactionsService,
     private readonly photos: EnvelopePhotosService,
+    private readonly moves: EnvelopeMovesService,
   ) {}
 
   // The plan's envelopes in display order (by group position, those without a group last) with
@@ -131,6 +134,12 @@ export class EnvelopesService {
     result.carryoverMinor = state.envelopes[index].carryoverMinor;
     result.activity = activity.items;
     result.activityTotal = activity.total;
+    const moves = await this.moves.forEnvelope(planId, envelope.id, key);
+    const liveNames = new Map(rows.map((row) => [row.id, row.name]));
+    result.moves = moves.items.map((move) =>
+      EnvelopeMoveDto.build(move, envelope.id, liveNames),
+    );
+    result.movesTotal = moves.total;
     return result;
   }
 
@@ -215,6 +224,8 @@ export class EnvelopesService {
     return EnvelopeDto.fromEntity(await this.saveUnique(envelope));
   }
 
+  // The moves it took part in stay in the other envelope's history (ON DELETE SET NULL, with the
+  // names stored); moves whose two envelopes are gone are removed.
   // The envelope's assignments go with it (FK ON DELETE CASCADE), so its money returns to Ready
   // to Assign; payees that suggested it lose the suggestion (ON DELETE SET NULL). Transactions keep
   // existing: their portions that used it lose the envelope (ON DELETE SET NULL, "Sin sobre").
@@ -222,6 +233,7 @@ export class EnvelopesService {
   async remove(planId: string, envelopeId: string): Promise<void> {
     const envelope = await this.find(planId, envelopeId);
     await this.envelopes.delete({ id: envelopeId, planId });
+    await this.moves.discardOrphans(planId);
     if (envelope.photoFile) {
       await this.photos.discard(envelope.photoFile);
     }
@@ -340,6 +352,14 @@ export class EnvelopesService {
         ],
         manager,
       );
+      // Same transaction and lock as the assignments: the history row exists only if they changed.
+      await this.moves.record(manager, {
+        planId,
+        month,
+        amountMinor: dto.amountMinor,
+        from: { id: dto.fromEnvelopeId, name: rows[fromIndex].name },
+        to: { id: dto.toEnvelopeId, name: rows[toIndex].name },
+      });
     });
     const after = this.calculation.calculateMonth(
       await this.ledger(plan, rows),
